@@ -15,14 +15,7 @@ const UART_PROFILES = [
   }
 ];
 
-/**
- * useBluetooth — Advanced custom hook for Web Bluetooth API integration.
- *
- * NOTE: The Web Bluetooth `requestLEScan` API is experimental and only works
- * in Chrome with `chrome://flags/#enable-experimental-web-platform-features`.
- * This hook uses `requestDevice` (the stable, universally-supported API) for
- * scanning and device discovery, which opens the browser's native BLE picker.
- */
+
 export default function useBluetooth({
   onData,
   onBluetoothPowerOffWhileConnected,
@@ -45,59 +38,11 @@ export default function useBluetooth({
   const serverRef         = useRef(null);
   const characteristicRef = useRef(null);
   const isPoweredOnRef    = useRef(true);
-  const knownDevicesRef   = useRef(new Map()); // id -> device entry
+  const knownDevicesRef   = useRef(new Map());
 
   const isBluetoothSupported = typeof navigator !== 'undefined' && !!navigator.bluetooth;
 
-  // ─── Setup characteristics subscription ────────────────────────────────────
-  const setupCharacteristics = useCallback(async (server) => {
-    let success = false;
-    let lastError = null;
 
-    for (const profile of UART_PROFILES) {
-      try {
-        console.log(`[BT] Attempting connection to service: ${profile.service}`);
-        const service = await server.getPrimaryService(profile.service);
-        const characteristic = await service.getCharacteristic(profile.characteristic);
-
-        if (characteristic.properties.notify) {
-          await characteristic.startNotifications();
-          characteristic.addEventListener('characteristicvaluechanged', handleNotification);
-        }
-        characteristicRef.current = characteristic;
-
-        // Request initial status
-        try {
-          const encoder = new TextEncoder();
-          await characteristic.writeValue(encoder.encode('STATUS'));
-        } catch (err) {
-          console.warn('[BT] Send STATUS command failed:', err.message);
-        }
-
-        console.log(`[BT] Successfully subscribed to service: ${profile.service}`);
-        success = true;
-        break; // Found working service, exit loop!
-      } catch (err) {
-        lastError = err;
-        console.info(`[BT] Profile ${profile.service} not active:`, err.message);
-      }
-    }
-
-    if (!success) {
-      console.warn('[BT] UART characteristics subscription failed. Operating without notifications.', lastError?.message);
-    }
-  }, [handleNotification]);
-
-  // ─── Disconnection listener ────────────────────────────────────────────────
-  const handleGattDisconnected = useCallback(() => {
-    setIsConnected(false);
-    setDeviceStatus(null);
-    setDeviceInfo({ name: null, id: null });
-    characteristicRef.current = null;
-    serverRef.current = null;
-  }, []);
-
-  // ─── Handle incoming BLE notifications ─────────────────────────────────────
   const handleNotification = useCallback(
     (event) => {
       try {
@@ -121,13 +66,59 @@ export default function useBluetooth({
           });
         }
       } catch {
-        // Ignore parsing errors
+
       }
     },
     [onData]
   );
 
-  // ─── Monitor Bluetooth availability ────────────────────────────────────────
+  const setupCharacteristics = useCallback(async (server) => {
+    let success = false;
+    let lastError = null;
+
+    for (const profile of UART_PROFILES) {
+      try {
+        console.log(`[BT] Attempting connection to service: ${profile.service}`);
+        const service = await server.getPrimaryService(profile.service);
+        const characteristic = await service.getCharacteristic(profile.characteristic);
+
+        if (characteristic.properties.notify) {
+          await characteristic.startNotifications();
+          characteristic.addEventListener('characteristicvaluechanged', handleNotification);
+        }
+        characteristicRef.current = characteristic;
+
+
+        try {
+          const encoder = new TextEncoder();
+          await characteristic.writeValue(encoder.encode('STATUS'));
+        } catch (err) {
+          console.warn('[BT] Send STATUS command failed:', err.message);
+        }
+
+        console.log(`[BT] Successfully subscribed to service: ${profile.service}`);
+        success = true;
+        break;
+      } catch (err) {
+        lastError = err;
+        console.info(`[BT] Profile ${profile.service} not active:`, err.message);
+      }
+    }
+
+    if (!success) {
+      console.warn('[BT] UART characteristics subscription failed. Operating without notifications.', lastError?.message);
+    }
+  }, [handleNotification]);
+
+  const handleGattDisconnected = useCallback(() => {
+    setIsConnected(false);
+    setDeviceStatus(null);
+    setDeviceInfo({ name: null, id: null });
+    characteristicRef.current = null;
+    serverRef.current = null;
+  }, []);
+
+
   useEffect(() => {
     if (!isBluetoothSupported) {
       setIsBluetoothPoweredOn(false);
@@ -160,7 +151,7 @@ export default function useBluetooth({
     };
   }, [isBluetoothSupported, onBluetoothEnabled, onBluetoothDisabled]);
 
-  // ─── Disconnect ─────────────────────────────────────────────────────────────
+
   const disconnect = useCallback(async () => {
     if (characteristicRef.current) {
       try {
@@ -171,7 +162,7 @@ export default function useBluetooth({
         if (characteristicRef.current.properties?.notify) {
           await characteristicRef.current.stopNotifications();
         }
-      } catch { /* ignore */ }
+      } catch {  }
       characteristicRef.current = null;
     }
 
@@ -182,7 +173,7 @@ export default function useBluetooth({
     handleGattDisconnected();
   }, [handleNotification, handleGattDisconnected]);
 
-  // ─── Auto disconnect on adapter disable ────────────────────────────────────
+
   useEffect(() => {
     if (!isBluetoothPoweredOn && isConnected) {
       disconnect();
@@ -193,7 +184,7 @@ export default function useBluetooth({
     }
   }, [isBluetoothPoweredOn, isConnected, disconnect, onBluetoothPowerOffWhileConnected]);
 
-  // ─── Add / update a device in the discovered list ──────────────────────────
+
   const addDiscoveredDevice = useCallback((device, rssi = -70) => {
     const id   = device.id;
     const name = device.name || `BLE Device (${id.slice(0, 8)})`;
@@ -215,21 +206,13 @@ export default function useBluetooth({
         next[index] = entry;
         return next;
       }
-      // New device — notify caller
+
       if (onDeviceFound) onDeviceFound(name);
       return [...prev, entry];
     });
   }, [onDeviceFound]);
 
-  /**
-   * startScanning — opens the browser's native BLE device picker.
-   *
-   * `requestLEScan` is an experimental API that requires a Chrome flag and is
-   * NOT available in production Chrome. The only reliable way to discover BLE
-   * devices via Web Bluetooth is `requestDevice`, which shows the browser's
-   * built-in chooser dialog. Each call adds the chosen device to the
-   * discovered list so the user can keep scanning for more.
-   */
+
   const startScanning = useCallback(async () => {
     if (!isBluetoothSupported) return;
 
@@ -237,7 +220,7 @@ export default function useBluetooth({
     setIsScanning(true);
 
     try {
-      // Try experimental LE Scan API first (Chrome with flag enabled)
+
       if (navigator.bluetooth.requestLEScan) {
         try {
           const scan = await navigator.bluetooth.requestLEScan({
@@ -245,7 +228,7 @@ export default function useBluetooth({
             keepRepeatedDevices: false,
           });
 
-          // Listen for advertisement events
+
           const onAdvert = (event) => {
             const dev  = event.device;
             const rssi = event.rssi !== undefined ? event.rssi : -75;
@@ -253,35 +236,35 @@ export default function useBluetooth({
           };
           navigator.bluetooth.addEventListener('advertisementreceived', onAdvert);
 
-          // Auto-stop after 15 seconds
+
           setTimeout(() => {
             try { scan.stop(); } catch {}
             navigator.bluetooth.removeEventListener('advertisementreceived', onAdvert);
             setIsScanning(false);
           }, 15000);
 
-          return; // LEScan is running — return early
+          return;
         } catch (leScanErr) {
-          // LEScan failed (flag not enabled, permission denied, etc.) — fall through
+
           console.info('[BT] requestLEScan not available, falling back to requestDevice picker:', leScanErr.message);
         }
       }
 
-      // ── Fallback: requestDevice picker ──────────────────────────────────────
-      // This is the ONLY universally-supported way to discover BLE devices.
-      // It shows the browser's native chooser with ALL nearby BLE devices.
+
+
+
       const device = await navigator.bluetooth.requestDevice({
         acceptAllDevices: true,
         optionalServices: OPTIONAL_SERVICES,
       });
 
-      // Simulate a realistic RSSI for display purposes
-      const simulatedRssi = -(Math.floor(Math.random() * 40) + 50); // -50 to -90
+
+      const simulatedRssi = -(Math.floor(Math.random() * 40) + 50);
       addDiscoveredDevice(device, simulatedRssi);
 
     } catch (err) {
       if (err.name === 'NotFoundError' || err.name === 'AbortError') {
-        // User cancelled — not an error
+
         console.info('[BT] User closed device picker without selecting a device.');
       } else {
         console.warn('[BT] Scan failed:', err.message);
@@ -292,18 +275,18 @@ export default function useBluetooth({
     }
   }, [isBluetoothSupported, isBluetoothPoweredOn, addDiscoveredDevice]);
 
-  // ─── Stop Scanning ─────────────────────────────────────────────────────────
+
   const stopScanning = useCallback(() => {
     setIsScanning(false);
   }, []);
 
-  // ─── Clear discovered devices list ─────────────────────────────────────────
+
   const clearDiscoveredDevices = useCallback(() => {
     knownDevicesRef.current.clear();
     setDiscoveredDevices([]);
   }, []);
 
-  // ─── Clear devices list when Bluetooth turns off ───────────────────────────
+
   useEffect(() => {
     if (!isBluetoothPoweredOn) {
       stopScanning();
@@ -311,7 +294,7 @@ export default function useBluetooth({
     }
   }, [isBluetoothPoweredOn, stopScanning, clearDiscoveredDevices]);
 
-  // ─── Reconnection flow ─────────────────────────────────────────────────────
+
   const attemptAutoReconnect = useCallback(async () => {
     if (!isBluetoothSupported || !isBluetoothPoweredOn || !navigator.bluetooth.getDevices) return;
     const lastDeviceStr = localStorage.getItem('lastConnectedDevice');
@@ -346,7 +329,7 @@ export default function useBluetooth({
     }
   }, [isBluetoothSupported, isBluetoothPoweredOn, handleGattDisconnected, setupCharacteristics, onReconnectSuccess]);
 
-  // ─── Connect to a specific scanned device ──────────────────────────────────
+
   const connectDevice = useCallback(async (scannedDevice) => {
     if (!isBluetoothSupported || !isBluetoothPoweredOn) return null;
     setIsConnecting(true);
@@ -393,7 +376,7 @@ export default function useBluetooth({
     }
   }, [isBluetoothSupported, isBluetoothPoweredOn, handleGattDisconnected, setupCharacteristics]);
 
-  // ─── Legacy scanning picker (direct connect via native chooser) ───────────
+
   const connect = useCallback(async () => {
     if (!isBluetoothSupported) return null;
     setIsConnecting(true);
@@ -408,7 +391,7 @@ export default function useBluetooth({
       const name = device.name || 'Unknown Device';
       const id   = device.id || 'N/A';
 
-      // Also add to discovered list
+
       addDiscoveredDevice(device, -65);
 
       device.addEventListener('gattserverdisconnected', handleGattDisconnected);
@@ -433,14 +416,14 @@ export default function useBluetooth({
     }
   }, [isBluetoothSupported, isBluetoothPoweredOn, handleGattDisconnected, setupCharacteristics, addDiscoveredDevice]);
 
-  // ─── Auto-reconnect when Bluetooth powers on ──────────────────────────────
+
   useEffect(() => {
     if (isBluetoothPoweredOn) {
       attemptAutoReconnect().catch(() => {});
     }
   }, [isBluetoothPoweredOn, attemptAutoReconnect]);
 
-  // ─── Unified connectionStatus state machine ────────────────────────────────
+
   const connectionStatus = useMemo(() => {
     if (!isBluetoothSupported) return 'unsupported';
     if (!isBluetoothPoweredOn) return 'off';

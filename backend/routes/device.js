@@ -14,7 +14,7 @@ router.get('/history', ctrl.getHistory);
 // DELETE /device/all             — wipe ALL records from the database
 router.delete('/all', ctrl.deleteAllData);
 
-// ─── CRUD operations on /device ──────────────────────────────────────────────
+// ─── CRUD operations on /device 
 
 // GET  /device?deviceId=X        — paginated history for a device (or all devices if deviceId is omitted)
 router.get('/', ctrl.getData);

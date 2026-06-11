@@ -49,7 +49,7 @@ exports.getData = async (req, res) => {
   }
 };
 
-// ─── GET /device/history ──────────────────────────────────────────────────────
+// ─── GET /device/history
 // Returns paginated history of device data
 exports.getHistory = async (req, res) => {
   try {
@@ -151,8 +151,8 @@ exports.postData = async (req, res) => {
   }
 };
 
-// ─── PUT /device ──────
-// Update an existing device reading by document ID (id/_id) or deviceId (latest reading)
+// Update a device reading by document ID (id/_id) or deviceId (latest reading)
+// Saves a NEW reading with the updated fields, preserving the old reading in the database
 exports.putData = async (req, res) => {
   try {
     const { id, _id, deviceId, tiltAngle, height, voltageStatus, batterySOC } = req.body;
@@ -179,13 +179,23 @@ exports.putData = async (req, res) => {
       return res.status(404).json({ success: false, error: 'Device reading not found' });
     }
 
+    // Clone the base document to preserve previous record
+    const baseData = targetReading.toObject();
+    delete baseData._id;
+    delete baseData.__v;
+
+    const newReading = new DeviceData({
+      ...baseData,
+      timestamp: new Date(),
+    });
+
     // Update fields if provided
     if (tiltAngle !== undefined) {
       const parsedTilt = parseFloat(tiltAngle);
       if (isNaN(parsedTilt) || parsedTilt < 0 || parsedTilt > 90) {
         return res.status(400).json({ success: false, error: 'tiltAngle must be a number between 0 and 90' });
       }
-      targetReading.tiltAngle = parsedTilt;
+      newReading.tiltAngle = parsedTilt;
     }
 
     if (height !== undefined) {
@@ -193,11 +203,11 @@ exports.putData = async (req, res) => {
       if (isNaN(parsedHeight) || parsedHeight < 0) {
         return res.status(400).json({ success: false, error: 'height must be a positive number' });
       }
-      targetReading.height = parsedHeight;
+      newReading.height = parsedHeight;
     }
 
     if (voltageStatus !== undefined) {
-      targetReading.voltageStatus = Boolean(voltageStatus);
+      newReading.voltageStatus = Boolean(voltageStatus);
     }
 
     if (batterySOC !== undefined) {
@@ -205,22 +215,28 @@ exports.putData = async (req, res) => {
       if (isNaN(parsedSOC) || parsedSOC < 0 || parsedSOC > 100) {
         return res.status(400).json({ success: false, error: 'batterySOC must be a number between 0 and 100' });
       }
-      targetReading.batterySOC = parsedSOC;
+      newReading.batterySOC = parsedSOC;
     }
 
-    await targetReading.save();
+    await newReading.save();
 
-    res.json({
+    // Broadcast the new reading to all Socket.IO clients
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('deviceData', { ...newReading.toObject(), source: 'postman' });
+    }
+
+    res.status(201).json({
       success: true,
-      message: 'Reading updated successfully',
-      data: targetReading,
+      message: 'Reading saved as a new record successfully (previous data preserved)',
+      data: newReading,
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 };
 
-// ─── POST /device/connect ────────────────────────────────────────────────────
+// ─── POST /device/connect 
 exports.connect = async (req, res) => {
   try {
     const { deviceName, deviceId, action } = req.body;
@@ -274,11 +290,25 @@ exports.deleteData = async (req, res) => {
       if (result.deletedCount === 0) {
         return res.status(404).json({ success: false, error: 'Device reading not found' });
       }
+
+      // Broadcast the deletion to all Socket.IO clients
+      const io = req.app.get('io');
+      if (io) {
+        io.emit('deviceDataDeleted', { id: targetId });
+      }
+
       return res.json({ success: true, deleted: result.deletedCount, message: 'Reading deleted successfully' });
     }
 
     if (deviceId) {
       const result = await DeviceData.deleteMany({ deviceId });
+
+      // Broadcast the deletion of all device readings to all Socket.IO clients
+      const io = req.app.get('io');
+      if (io) {
+        io.emit('deviceDataDeleted', { deviceId });
+      }
+
       return res.json({ success: true, deleted: result.deletedCount, deviceId, message: 'All readings for device deleted successfully' });
     }
 
@@ -291,11 +321,18 @@ exports.deleteData = async (req, res) => {
   }
 };
 
-// ─── DELETE /device/all ──────────────────────────────────────────────────────
+// ─── DELETE /device/all
 // Wipe every record — used to clear test / temporary data
 exports.deleteAllData = async (req, res) => {
   try {
     const result = await DeviceData.deleteMany({});
+
+    // Broadcast the full deletion to all Socket.IO clients
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('deviceDataAllDeleted');
+    }
+
     return res.json({
       success: true,
       deleted: result.deletedCount,
@@ -313,23 +350,4 @@ exports.getConnectionLog   = () => connectionLog;
 exports.addConnectionLog   = (entry) => {
   connectionLog.unshift(entry);
   if (connectionLog.length > 100) connectionLog = connectionLog.slice(0, 100);
-};
-
-// NOTE: generateSimulatedData is ONLY for Socket.IO broadcast to the frontend.
-// Simulated data is NEVER saved to MongoDB.
-let _tilt = 30, _height = 10, _battery = 78, _voltage = true;
-exports.generateSimulatedData = () => {
-  _tilt    = Math.max(0,   Math.min(90,  _tilt    + (Math.random() - 0.5) * 3));
-  _height  = Math.max(0,   Math.min(50,  _height  + (Math.random() - 0.5) * 0.5));
-  _battery = Math.max(0,   Math.min(100, _battery - Math.random() * 0.2));
-  _voltage = Math.random() > 0.05;
-  return {
-    deviceId:      'simulated',
-    tiltAngle:     parseFloat(_tilt.toFixed(2)),
-    height:        parseFloat(_height.toFixed(2)),
-    voltageStatus: _voltage,
-    batterySOC:    parseFloat(_battery.toFixed(1)),
-    timestamp:     new Date(),
-    simulated:     true,
-  };
 };

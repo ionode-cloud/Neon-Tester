@@ -10,7 +10,7 @@ import useBluetooth from './hooks/useBluetooth';
 import useSocket from './hooks/useSocket';
 import { deviceApi } from './services/api';
 
-// ─── BatteryBar Component ─────────────────────────────────────────────────────
+
 function BatteryBar({ value = 0 }) {
   const clamped = Math.max(0, Math.min(100, value));
 
@@ -30,12 +30,12 @@ function BatteryBar({ value = 0 }) {
 
   return (
     <div className="batt-wrapper">
-      {/* Battery icon */}
+      {}
       <div className={`batt-icon batt-${colorClass}`}>
         {getIcon()}
       </div>
 
-      {/* Bar track */}
+      {}
       <div className="batt-track">
         <div
           className={`batt-fill batt-${colorClass}`}
@@ -46,12 +46,12 @@ function BatteryBar({ value = 0 }) {
           aria-valuemax={100}
           aria-label={`Battery: ${clamped}%`}
         >
-          {/* Shimmer effect */}
+          {}
           <div className="batt-shimmer" />
         </div>
       </div>
 
-      {/* Percentage label */}
+      {}
       <span className={`batt-label batt-${colorClass}`}>
         {clamped.toFixed(1)}%
       </span>
@@ -59,7 +59,7 @@ function BatteryBar({ value = 0 }) {
   );
 }
 
-// ─── StatusCard Component ─────────────────────────────────────────────────────
+
 function StatusCard({
   icon,
   label,
@@ -76,10 +76,10 @@ function StatusCard({
       className={`card card-status card-status-${color} ${highlight ? 'card-status-flash' : ''} ${className}`}
       aria-label={`${label}: ${value}${unit}`}
     >
-      {/* Corner accent */}
+      {}
       <div className={`card-cornerAccent card-accent-${color}`} />
 
-      {/* Header row */}
+      {}
       <div className="card-header">
         <div className={`card-iconBox card-icon-${color}`}>
           {icon}
@@ -90,7 +90,7 @@ function StatusCard({
         </div>
       </div>
 
-      {/* Value */}
+      {}
       {value !== undefined && value !== null && (
         <div className="card-valueRow">
           <span className={`card-value font-display card-val-${color}`}>
@@ -100,13 +100,13 @@ function StatusCard({
         </div>
       )}
 
-      {/* Optional children (e.g. BatteryBar) */}
+      {}
       {children && <div className="card-extra">{children}</div>}
     </div>
   );
 }
 
-// ─── Header Component ──
+
 function Header({ deviceInfo, isConnected, isPhysicalConnected, isSocketConnected, lastUpdated }) {
   const formatTime = (date) => {
     if (!date) return '--';
@@ -147,7 +147,7 @@ function Header({ deviceInfo, isConnected, isPhysicalConnected, isSocketConnecte
   );
 }
 
-// ─── Helpers ───────────
+
 const getRssiClass = (rssi) => {
   if (rssi >= -60) return 'rssi-strong';
   if (rssi >= -75) return 'rssi-medium';
@@ -155,7 +155,7 @@ const getRssiClass = (rssi) => {
   return 'rssi-poor';
 };
 
-// ─── ConnectionScreen Component ───────────────────────────────────────────────
+
 function ConnectionScreen({
   onConnect,
   onConnectDevice,
@@ -169,7 +169,7 @@ function ConnectionScreen({
 }) {
   return (
     <main className="conn-screen" style={{ flexDirection: 'column', gap: '2rem', padding: '3rem 2rem' }}>
-      {/* Animated rings */}
+      {}
       <div className="conn-rings">
         <div className="conn-ring conn-ring1" />
         <div className="conn-ring conn-ring2" />
@@ -177,7 +177,7 @@ function ConnectionScreen({
       </div>
 
       <div className="conn-content animate-fadeInUp" style={{ width: '100%', maxWidth: '800px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        {/* Warning: Bluetooth Off */}
+        {}
         {!isBluetoothPoweredOn && isBluetoothSupported && (
           <div className="warn-banner" style={{ marginBottom: '2rem', width: '100%', maxWidth: '500px' }}>
             <RiSignalWifiErrorLine style={{ fontSize: '1.5rem' }} />
@@ -188,7 +188,7 @@ function ConnectionScreen({
           </div>
         )}
 
-        {/* Warning: Web Bluetooth Not Supported */}
+        {}
         {!isBluetoothSupported && (
           <div className="conn-errorBox" style={{ marginBottom: '2rem', width: '100%', maxWidth: '500px' }}>
             <RiSignalWifiErrorLine style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }} />
@@ -196,7 +196,7 @@ function ConnectionScreen({
           </div>
         )}
 
-        {/* Bluetooth icon */}
+        {}
         <div className="conn-iconWrap" style={{ width: '80px', height: '80px', marginBottom: '1rem' }}>
           <RiBluetoothLine className="conn-btIcon" style={{ fontSize: '2.2rem' }} />
           {connectionStatus === 'scanning' && <div className="conn-scanRing" />}
@@ -215,14 +215,14 @@ function ConnectionScreen({
               : 'Click Scan & Connect Device to open the BLE picker.'}
         </p>
 
-        {/* Error alert */}
+        {}
         {error && (
           <div className="conn-errorBox" style={{ marginBottom: '1.5rem', width: '100%', maxWidth: '500px' }}>
             <span className="text-sm">{error}</span>
           </div>
         )}
 
-        {/* Scan Button */}
+        {}
         {isBluetoothSupported && connectionStatus !== 'connecting' && (
           <button
             id="btn-scan-bluetooth"
@@ -250,11 +250,14 @@ function ConnectionScreen({
 }
 
 
-// ─── Dashboard Component ──────────────────────────────────────────────────────
-const MAX_HISTORY = 60; // rolling history window for stats
+
+const MAX_HISTORY = 60;
 
 function Dashboard({
   deviceData,
+  lastUpdatedEvent,
+  lastDeletedEvent,
+  lastAllDeletedEvent,
   deviceInfo,
   isConnected,
   isPhysicalConnected,
@@ -265,20 +268,33 @@ function Dashboard({
   const [flashKey, setFlashKey] = useState(0);
   const [lastUpdated, setLastUpdated] = useState(null);
   const prevDataRef = useRef(null);
+  const prevUpdatedRef = useRef(null);
+  const prevDeletedRef = useRef(null);
+  const prevAllDeletedRef = useRef(null);
 
-  // ── Load initial data from API on mount ──────────────────────────────────────
+
   useEffect(() => {
-    deviceApi.getData()
-      .then((res) => {
-        if (res?.latest) {
-          setHistory([res.latest]);
-          setLastUpdated(res.latest.timestamp);
-        }
-      })
-      .catch(() => { });
+    const fetchLatest = () => {
+      deviceApi.getData()
+        .then((res) => {
+          if (res?.latest) {
+            setLastUpdated(res.latest.timestamp || new Date());
+            setHistory(prev => {
+              const last = prev[prev.length - 1];
+              if (last && last.timestamp === res.latest.timestamp) return prev;
+              const updated = [...prev, res.latest];
+              return updated.length > MAX_HISTORY ? updated.slice(-MAX_HISTORY) : updated;
+            });
+          }
+        })
+        .catch(() => { });
+    };
+
+    fetchLatest();
+    const interval = setInterval(fetchLatest, 2000);
+    return () => clearInterval(interval);
   }, []);
 
-  // ── Append incoming real-time data point ─────────────────────────────────────
   useEffect(() => {
     if (!deviceData) return;
     if (
@@ -296,6 +312,71 @@ function Dashboard({
     });
   }, [deviceData]);
 
+  useEffect(() => {
+    if (!lastUpdatedEvent) return;
+    if (
+      prevUpdatedRef.current &&
+      prevUpdatedRef.current._receivedAt === lastUpdatedEvent._receivedAt
+    ) return;
+
+    prevUpdatedRef.current = lastUpdatedEvent;
+    setFlashKey(k => k + 1);
+    setLastUpdated(new Date());
+
+    setHistory(prev => {
+      return prev.map(item => {
+        const itemId = item._id || item.id;
+        const updatedId = lastUpdatedEvent._id || lastUpdatedEvent.id;
+        if (itemId && updatedId && itemId === updatedId) {
+          return lastUpdatedEvent;
+        }
+        return item;
+      });
+    });
+  }, [lastUpdatedEvent]);
+
+  useEffect(() => {
+    if (!lastDeletedEvent) return;
+    if (
+      prevDeletedRef.current &&
+      prevDeletedRef.current._receivedAt === lastDeletedEvent._receivedAt
+    ) return;
+
+    prevDeletedRef.current = lastDeletedEvent;
+    setFlashKey(k => k + 1);
+    setLastUpdated(new Date());
+
+    setHistory(prev => {
+      return prev.filter(item => {
+        const itemId = item._id || item.id;
+        const deletedId = lastDeletedEvent.id || lastDeletedEvent._id;
+        
+        if (itemId && deletedId && itemId === deletedId) {
+          return false;
+        }
+        
+        if (lastDeletedEvent.deviceId && item.deviceId === lastDeletedEvent.deviceId) {
+          return false;
+        }
+        
+        return true;
+      });
+    });
+  }, [lastDeletedEvent]);
+
+  useEffect(() => {
+    if (!lastAllDeletedEvent) return;
+    if (
+      prevAllDeletedRef.current &&
+      prevAllDeletedRef.current === lastAllDeletedEvent
+    ) return;
+
+    prevAllDeletedRef.current = lastAllDeletedEvent;
+    setHistory([]);
+    setFlashKey(k => k + 1);
+    setLastUpdated(new Date());
+  }, [lastAllDeletedEvent]);
+
   const current = deviceData || history[history.length - 1] || null;
 
   const formatTime = (ts) => {
@@ -305,7 +386,7 @@ function Dashboard({
     }).format(new Date(ts));
   };
 
-  // ── Summary stats ────
+
   const stats = React.useMemo(() => {
     if (!history.length) return null;
     const tilts = history.map(h => h.tiltAngle).filter((v) => v !== undefined && v !== null);
@@ -323,7 +404,7 @@ function Dashboard({
 
   return (
     <main className="dash-wrapper">
-      {/* ── Top bar ───── */}
+      {}
       <div className="dash-topBar">
         <div className="dash-topLeft">
           <RiDashboard3Line className="dash-topIcon" />
@@ -366,9 +447,9 @@ function Dashboard({
         </div>
       </div>
 
-      {/* ── KPI Cards ─── */}
+      {}
       <div className="grid grid-4 dash-kpiGrid">
-        {/* Tilt Angle */}
+        {}
         <StatusCard
           key={`tilt-${flashKey}`}
           icon={<RiCompassLine />}
@@ -381,7 +462,7 @@ function Dashboard({
           className="animate-fadeInUp stagger-1"
         />
 
-        {/* Height */}
+        {}
         <StatusCard
           key={`height-${flashKey}`}
           icon={<RiRulerLine />}
@@ -394,7 +475,7 @@ function Dashboard({
           className="animate-fadeInUp stagger-2"
         />
 
-        {/* Voltage Status */}
+        {}
         <StatusCard
           icon={<RiFlashlightLine />}
           label="Voltage Status"
@@ -409,7 +490,7 @@ function Dashboard({
           </div>
         </StatusCard>
 
-        {/* Battery SOC */}
+        {}
         <StatusCard
           key={`batt-${flashKey}`}
           icon={<RiBatteryFill />}
@@ -431,8 +512,8 @@ function Dashboard({
   );
 }
 
-// ─── CloudDataView Component ──────────────────────────────────────────────────
-function CloudDataView() {
+
+function CloudDataView({ lastCreated, lastUpdated, lastDeleted, lastAllDeleted }) {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -442,8 +523,10 @@ function CloudDataView() {
   const [limit, setLimit] = useState(15);
   const [filterDeviceId, setFilterDeviceId] = useState('');
 
-  const fetchData = useCallback(() => {
-    setLoading(true);
+  const fetchData = useCallback((isBackground = false) => {
+    if (!isBackground) {
+      setLoading(true);
+    }
     deviceApi.getHistory({
       page,
       limit,
@@ -463,13 +546,21 @@ function CloudDataView() {
         setError(err.message || 'Error communicating with server');
       })
       .finally(() => {
-        setLoading(false);
+        if (!isBackground) {
+          setLoading(false);
+        }
       });
   }, [page, limit, filterDeviceId]);
 
   useEffect(() => {
-    fetchData();
+    fetchData(false);
   }, [fetchData]);
+
+  useEffect(() => {
+    if (lastCreated || lastUpdated || lastDeleted || lastAllDeleted) {
+      fetchData(true);
+    }
+  }, [lastCreated, lastUpdated, lastDeleted, lastAllDeleted, fetchData]);
 
   const handleDelete = async (id) => {
     if (!window.confirm('Are you sure you want to delete this record?')) return;
@@ -553,7 +644,7 @@ function CloudDataView() {
 
   return (
     <div className="dash-wrapper" style={{ padding: '2rem 1.5rem', flex: 1, display: 'flex', flexDirection: 'column' }}>
-      {/* Header Bar */}
+      {}
       <div className="dash-topBar" style={{ marginBottom: '1.5rem' }}>
         <div className="dash-topLeft">
           <RiDatabase2Line className="dash-topIcon" style={{ color: 'var(--neon-cyan)', fontSize: '1.75rem' }} />
@@ -581,7 +672,7 @@ function CloudDataView() {
         </div>
       </div>
 
-      {/* Filter Toolbar */}
+      {}
       <div className="card" style={{ padding: '1rem 1.25rem', marginBottom: '1.5rem', display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'center' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', flex: '1 1 200px' }}>
           <label className="section-label" style={{ margin: 0 }}>Filter by Device ID</label>
@@ -641,7 +732,7 @@ function CloudDataView() {
         )}
       </div>
 
-      {/* Main Table */}
+      {}
       <div className="card" style={{ padding: 0, overflow: 'hidden', flex: 1, display: 'flex', flexDirection: 'column' }}>
         {loading ? (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '300px' }}>
@@ -704,7 +795,7 @@ function CloudDataView() {
         )}
       </div>
 
-      {/* Pagination Controls */}
+      {}
       {totalPages > 1 && !loading && !error && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1.5rem', marginTop: '1.5rem' }}>
           <button
@@ -730,7 +821,7 @@ function CloudDataView() {
   );
 }
 
-// ─── Main App Component 
+
 export default function App() {
   const [initialized, setInitialized] = useState(false);
   const [isCloudDataView, setIsCloudDataView] = useState(false);
@@ -738,12 +829,10 @@ export default function App() {
     return !!localStorage.getItem('lastConnectedDevice');
   });
 
-  // Mock connection states
-  const [mockIntervalId, setMockIntervalId] = useState(null);
-  const [isMockConnected, setIsMockConnected] = useState(false);
-  const [mockDeviceInfo, setMockDeviceInfo] = useState({ name: null, id: null });
 
-  // Toast notifications state
+
+
+
   const [toasts, setToasts] = useState([]);
   const showToast = useCallback((message, type = 'info') => {
     const id = Date.now() + Math.random();
@@ -760,19 +849,23 @@ export default function App() {
     }
   }, []);
 
-  // ── Socket ───────────
+
   const {
     deviceData,
+    lastCreated,
+    lastUpdated: lastUpdatedEvent,
+    lastDeleted,
+    lastAllDeleted,
     isSocketConnected,
     emitBluetoothData,
     emitDeviceConnected,
     emitDeviceDisconnected,
   } = useSocket();
 
-  // ── Bluetooth ────────
+
   const handleBluetoothData = useCallback(
     (data) => {
-      emitBluetoothData(data); // relay to backend via Socket.IO
+      emitBluetoothData(data);
     },
     [emitBluetoothData]
   );
@@ -823,29 +916,10 @@ export default function App() {
     }
   });
 
-  // Clean up mock stream interval on unmount
-  useEffect(() => {
-    return () => {
-      if (mockIntervalId) clearInterval(mockIntervalId);
-    };
-  }, [mockIntervalId]);
 
-  // Disconnect mock hardware if Bluetooth radio is turned OFF
-  useEffect(() => {
-    if (!isBluetoothPoweredOn && isMockConnected) {
-      if (mockIntervalId) clearInterval(mockIntervalId);
-      setMockIntervalId(null);
-      setIsMockConnected(false);
-      setMockDeviceInfo({ name: null, id: null });
-      showToast('Bluetooth turned OFF! Disconnected mock hardware.', 'error');
-    }
-  }, [isBluetoothPoweredOn, isMockConnected, mockIntervalId, showToast]);
-
-  // ── Effective connection state ───────────────────────────────────────────────
-  const isConnected = btConnected || isMockConnected || wasConnected;
+  const isConnected = btConnected || wasConnected;
   const deviceInfo = useMemo(() => {
     if (btConnected) return btDeviceInfo;
-    if (isMockConnected) return mockDeviceInfo;
     const lastDeviceStr = localStorage.getItem('lastConnectedDevice');
     if (lastDeviceStr) {
       try {
@@ -855,17 +929,17 @@ export default function App() {
       }
     }
     return { name: null, id: null };
-  }, [btConnected, isMockConnected, btDeviceInfo, mockDeviceInfo]);
+  }, [btConnected, btDeviceInfo]);
 
   const lastUpdated = deviceData?.timestamp ?? deviceData?._receivedAt;
 
-  // ── Scan handler — opens browser BLE picker to discover devices ────────────
+
   const handleScan = useCallback(async () => {
     showToast('Opening BLE device picker — select a device to add it to the list.', 'info');
     await startScanning();
   }, [startScanning, showToast]);
 
-  // ── Connect handler (Legacy Native Chooser dialog) ──────────────────────────
+
   const handleConnect = useCallback(async () => {
     showToast('Opening native BLE chooser dialog...', 'info');
     const result = await connect();
@@ -877,37 +951,8 @@ export default function App() {
     }
   }, [connect, emitDeviceConnected, showToast]);
 
-  // ── Connect scanned device handler (Grid Selection) ────────────────────────
+
   const handleConnectDevice = useCallback(async (dev) => {
-    if (dev.deviceObj.mock) {
-      showToast(`Connecting to Mock Hardware: ${dev.name}...`, 'info');
-      setIsMockConnected(true);
-      setMockDeviceInfo({ name: dev.name, id: dev.id });
-      showToast(`Connected to ${dev.name}!`, 'success');
-
-      if (mockIntervalId) clearInterval(mockIntervalId);
-
-      let _tilt = 30, _height = 10, _battery = 78, _voltage = true;
-      const interval = setInterval(() => {
-        _tilt = Math.max(0, Math.min(90, _tilt + (Math.random() - 0.5) * 3));
-        _height = Math.max(0, Math.min(50, _height + (Math.random() - 0.5) * 0.5));
-        _battery = Math.max(0, Math.min(100, _battery - Math.random() * 0.2));
-        _voltage = Math.random() > 0.05;
-
-        handleBluetoothData({
-          deviceId: dev.id,
-          tiltAngle: parseFloat(_tilt.toFixed(2)),
-          height: parseFloat(_height.toFixed(2)),
-          voltageStatus: _voltage,
-          batterySOC: parseFloat(_battery.toFixed(1)),
-          timestamp: new Date(),
-          _receivedAt: new Date().getTime()
-        });
-      }, 1000);
-      setMockIntervalId(interval);
-      return;
-    }
-
     showToast(`Connecting to ${dev.name}...`, 'info');
     const result = await connectDevice(dev);
 
@@ -916,21 +961,12 @@ export default function App() {
       await deviceApi.connect({ deviceName: result.name, deviceId: result.id });
       emitDeviceConnected({ deviceName: result.name, deviceId: result.id });
     }
-  }, [connectDevice, handleBluetoothData, mockIntervalId, showToast, emitDeviceConnected]);
+  }, [connectDevice, showToast, emitDeviceConnected]);
 
-  // ── Disconnect handler 
+
   const handleDisconnect = useCallback(async () => {
     localStorage.removeItem('lastConnectedDevice');
     setWasConnected(false);
-
-    if (isMockConnected) {
-      if (mockIntervalId) clearInterval(mockIntervalId);
-      setMockIntervalId(null);
-      setIsMockConnected(false);
-      setMockDeviceInfo({ name: null, id: null });
-      showToast('Mock hardware disconnected', 'warning');
-      return;
-    }
 
     const name = btConnected ? btDeviceInfo.name : deviceInfo.name;
     if (btConnected) {
@@ -942,9 +978,9 @@ export default function App() {
       emitDeviceDisconnected({ deviceName: name });
       await deviceApi.disconnect(name);
     }
-  }, [btConnected, isMockConnected, mockIntervalId, disconnect, emitDeviceDisconnected, btDeviceInfo, deviceInfo, showToast]);
+  }, [btConnected, disconnect, emitDeviceDisconnected, btDeviceInfo, deviceInfo, showToast]);
 
-  // ── Initialize ───────
+
   useEffect(() => {
     setInitialized(true);
   }, []);
@@ -960,13 +996,18 @@ export default function App() {
   if (isCloudDataView) {
     return (
       <>
-        {/* Background decorations */}
+        {}
         <div className="bg-grid" aria-hidden="true" />
         <div className="bg-glow bg-glow-1" aria-hidden="true" />
         <div className="bg-glow bg-glow-2" aria-hidden="true" />
 
         <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-          <CloudDataView />
+          <CloudDataView
+            lastCreated={lastCreated}
+            lastUpdated={lastUpdatedEvent}
+            lastDeleted={lastDeleted}
+            lastAllDeleted={lastAllDeleted}
+          />
         </div>
       </>
     );
@@ -974,7 +1015,7 @@ export default function App() {
 
   return (
     <>
-      {/* Background decorations */}
+      {}
       <div className="bg-grid" aria-hidden="true" />
       <div className="bg-glow bg-glow-1" aria-hidden="true" />
       <div className="bg-glow bg-glow-2" aria-hidden="true" />
@@ -983,7 +1024,7 @@ export default function App() {
         <Header
           deviceInfo={deviceInfo}
           isConnected={isConnected}
-          isPhysicalConnected={btConnected || isMockConnected}
+          isPhysicalConnected={btConnected}
           isSocketConnected={isSocketConnected}
           lastUpdated={lastUpdated}
         />
@@ -1004,9 +1045,12 @@ export default function App() {
         ) : (
           <Dashboard
             deviceData={deviceData}
+            lastUpdatedEvent={lastUpdatedEvent}
+            lastDeletedEvent={lastDeleted}
+            lastAllDeletedEvent={lastAllDeleted}
             deviceInfo={deviceInfo}
             isConnected={isConnected}
-            isPhysicalConnected={btConnected || isMockConnected}
+            isPhysicalConnected={btConnected}
             onDisconnect={handleDisconnect}
             onReconnect={handleConnect}
           />

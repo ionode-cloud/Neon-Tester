@@ -1,4 +1,4 @@
-/* ─── Neon Bluetooth Monitor — Global Design System ──────────────────────── */
+/* ─── Neon Bluetooth Monitor — Global Design System  */
 
 /* Google Fonts are loaded in index.html */
 
@@ -60,7 +60,7 @@
   --font-display: 'Orbitron', sans-serif;
 }
 
-/* ─── Reset & Base ─────────────────────────────────────────────────────────── */
+/* ─── Reset & Base ─────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 html { scroll-behavior: smooth; }
@@ -83,7 +83,7 @@ body {
 
 #root { min-height: 100vh; display: flex; flex-direction: column; }
 
-/* ─── Background grid ──────────────────────────────────────────────────────── */
+/* ─── Background grid ──── */
 .bg-grid {
   display: none;
 }
@@ -100,10 +100,10 @@ body {
 .bg-glow-1 { background: var(--neon-blue); top: -200px; left: -200px; }
 .bg-glow-2 { background: var(--neon-purple); bottom: -200px; right: -200px; }
 
-/* ─── Utility classes ──────────────────────────────────────────────────────── */
+/* ─── Utility classes ──── */
 
 
-/* ─── Typography ───────────────────────────────────────────────────────────── */
+/* ─── Typography ───────── */
 .font-display { font-family: var(--font-display); }
 .font-mono { font-family: var(--font-mono); }
 
@@ -112,7 +112,7 @@ body {
 .text-muted     { color: var(--text-muted); }
 .text-cyan      { color: var(--neon-cyan); }
 
-/* ─── Glass Card ───────────────────────────────────────────────────────────── */
+/* ─── Glass Card ───────── */
 .card {
   background: var(--gradient-card);
   border: 1px solid var(--border);
@@ -137,7 +137,7 @@ body {
 
 .card-sm { padding: 1rem; border-radius: var(--radius-md); }
 
-/* ─── Button ───────────────────────────────────────────────────────────────── */
+/* ─── Button ───────────── */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -199,7 +199,7 @@ body {
   background: rgba(0, 229, 255, 0.05);
 }
 
-/* ─── Scan Info Box ─────────────────────────────────────────────────────────── */
+/* ─── Scan Info Box ─────── */
 .scan-info-box {
   display: flex;
   align-items: flex-start;
@@ -217,7 +217,7 @@ body {
 }
 .scan-info-box strong { color: var(--neon-cyan); }
 
-/* ─── Demo badge ────────────────────────────────────────────────────────────── */
+/* ─── Demo badge ────────── */
 .badge-demo {
   background: rgba(124, 58, 237, 0.2);
   color: #a78bfa;
@@ -236,7 +236,7 @@ body {
 }
 
 
-/* ─── Badge ────────────────────────────────────────────────────────────────── */
+/* ─── Badge ────────────── */
 .badge {
   display: inline-flex;
   align-items: center;
@@ -251,7 +251,7 @@ body {
 .badge-active       { background: rgba(0,230,118,0.15); color: var(--neon-green); border: 1px solid rgba(0,230,118,0.3); }
 .badge-inactive     { background: rgba(255,23,68,0.15);  color: var(--neon-red);   border: 1px solid rgba(255,23,68,0.3); }
 
-/* ─── Animations ───────────────────────────────────────────────────────────── */
+/* ─── Animations ───────── */
 @keyframes fadeInUp {
   from { opacity: 0; transform: translateY(20px); }
   to   { opacity: 1; transform: translateY(0); }
@@ -286,7 +286,7 @@ body {
 .stagger-3 { animation-delay: 0.15s; }
 .stagger-4 { animation-delay: 0.2s; }
 
-/* ─── Spinner ──────────────────────────────────────────────────────────────── */
+/* ─── Spinner ──────────── */
 .spinner {
   width: 20px; height: 20px;
   border: 2.5px solid rgba(0,229,255,0.25);
@@ -296,7 +296,7 @@ body {
 }
 .spinner-lg { width: 40px; height: 40px; border-width: 3.5px; }
 
-/* ─── Status dot ───────────────────────────────────────────────────────────── */
+/* ─── Status dot ───────── */
 .status-dot {
   width: 10px; height: 10px;
   border-radius: 50%;
@@ -305,7 +305,7 @@ body {
 .status-dot.connected    { background: var(--neon-green); animation: pulse-dot 1.5s ease-in-out infinite; box-shadow: 0 0 8px var(--neon-green); }
 .status-dot.disconnected { background: var(--neon-red); }
 
-/* ─── Responsive grid ──────────────────────────────────────────────────────── */
+/* ─── Responsive grid ──── */
 .grid { display: grid; gap: 1.25rem; }
 .grid-4 { grid-template-columns: repeat(4, 1fr); }
 
@@ -316,7 +316,7 @@ body {
   .grid-4 { grid-template-columns: 1fr; }
 }
 
-/* ─── Section label ────────────────────────────────────────────────────────── */
+/* ─── Section label ────── */
 .section-label {
   font-size: 0.6875rem;
   font-weight: 700;
@@ -326,7 +326,7 @@ body {
   margin-bottom: 0.75rem;
 }
 
-/* ─── Header ───────────────────────────────────────────────────────────────── */
+/* ─── Header ───────────── */
 .header-wrapper {
   display: flex;
   align-items: center;
@@ -399,7 +399,7 @@ body {
   .header-title { font-size: 0.9rem; }
 }
 
-/* ─── Connection Screen ────────────────────────────────────────────────────── */
+/* ─── Connection Screen ── */
 .conn-screen {
   flex: 1;
   display: flex;
@@ -546,7 +546,7 @@ body {
   .conn-btIcon   { font-size: 2.5rem; }
 }
 
-/* ─── Dashboard ────────────────────────────────────────────────────────────── */
+/* ─── Dashboard ────────── */
 .dash-wrapper {
   display: flex;
   flex-direction: column;
@@ -600,7 +600,7 @@ body {
   .dash-topRight { flex-wrap: wrap; }
 }
 
-/* ─── Status Card ──────────────────────────────────────────────────────────── */
+/* ─── Status Card ──────── */
 .card-status {
   display: flex;
   flex-direction: column;
@@ -684,7 +684,7 @@ body {
 .card-status-red:hover    { border-color: rgba(255,23,68,0.4) !important;  box-shadow: var(--shadow-glow-red) !important; }
 .card-status-yellow:hover { border-color: rgba(255,214,0,0.4) !important;  box-shadow: var(--shadow-glow-yellow) !important; }
 
-/* ─── Battery Bar ──────────────────────────────────────────────────────────── */
+/* ─── Battery Bar ──────── */
 .batt-wrapper {
   display: flex;
   align-items: center;
@@ -745,7 +745,7 @@ body {
   flex-shrink: 0;
 }
 
-/* ─── Table Hover Effect ──────────────────────────────────────────────────── */
+/* ─── Table Hover Effect  */
 .table-row-hover {
   transition: background var(--transition-fast) ease;
 }
@@ -753,7 +753,7 @@ body {
   background: rgba(0, 229, 255, 0.04) !important;
 }
 
-/* ─── Toast Notifications ─────────────────────────────────────────────────── */
+/* ─── Toast Notifications ─── */
 .toast-container {
   position: fixed;
   bottom: 24px;
@@ -800,7 +800,7 @@ body {
   to   { transform: translateX(0); opacity: 1; }
 }
 
-/* ─── Real-time Device List ───────────────────────────────────────────────── */
+/* ─── Real-time Device List ─ */
 .device-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -877,7 +877,7 @@ body {
 .rssi-weak .rssi-bar:nth-child(-n+2) { background: var(--neon-orange); }
 .rssi-poor .rssi-bar:nth-child(1) { background: var(--neon-red); }
 
-/* ─── Warning Banner ──────────────────────────────────────────────────────── */
+/* ─── Warning Banner ──── */
 .warn-banner {
   background: rgba(255, 23, 68, 0.08);
   border: 1px solid rgba(255, 23, 68, 0.3);
@@ -896,7 +896,7 @@ body {
   50%       { border-color: rgba(255, 23, 68, 0.6); box-shadow: 0 0 24px rgba(255, 23, 68, 0.4); }
 }
 
-/* ─── Mobile Responsiveness Consolidation ──────────────────────────────────── */
+/* ─── Mobile Responsiveness Consolidation ──────────── */
 @media (max-width: 640px) {
   /* Header adjustments for smaller screens */
   .header-wrapper {

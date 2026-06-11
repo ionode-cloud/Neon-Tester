@@ -3,22 +3,15 @@ import { io } from 'socket.io-client';
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
 
-/**
- * useSocket — Custom hook for Socket.IO real-time data.
- *
- * Returns:
- *   - deviceData       : latest data point from backend
- *   - connectionStatus : server-side connection state
- *   - connectionLog    : array of log entries
- *   - isSocketConnected: boolean
- *   - emitBluetoothData(data): push BLE data to backend
- *   - emitDeviceConnected(info)
- *   - emitDeviceDisconnected(info)
- */
+
 export default function useSocket() {
   const socketRef = useRef(null);
   const [isSocketConnected, setIsSocketConnected] = useState(false);
   const [deviceData, setDeviceData] = useState(null);
+  const [lastCreated, setLastCreated] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const [lastDeleted, setLastDeleted] = useState(null);
+  const [lastAllDeleted, setLastAllDeleted] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState(null);
   const [connectionLog, setConnectionLog] = useState([]);
 
@@ -42,7 +35,21 @@ export default function useSocket() {
     });
 
     socket.on('deviceData', (data) => {
-      setDeviceData({ ...data, _receivedAt: Date.now() });
+      const reading = { ...data, _receivedAt: Date.now() };
+      setDeviceData(reading);
+      setLastCreated(reading);
+    });
+
+    socket.on('deviceDataUpdated', (data) => {
+      setLastUpdated({ ...data, _receivedAt: Date.now() });
+    });
+
+    socket.on('deviceDataDeleted', (data) => {
+      setLastDeleted({ ...data, _receivedAt: Date.now() });
+    });
+
+    socket.on('deviceDataAllDeleted', () => {
+      setLastAllDeleted(Date.now());
     });
 
     socket.on('connectionStatus', (status) => {
@@ -73,6 +80,10 @@ export default function useSocket() {
 
   return {
     deviceData,
+    lastCreated,
+    lastUpdated,
+    lastDeleted,
+    lastAllDeleted,
     connectionStatus,
     connectionLog,
     isSocketConnected,
