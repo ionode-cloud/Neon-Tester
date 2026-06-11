@@ -30,6 +30,14 @@ const deviceDataSchema = new mongoose.Schema(
       min: 0,
       max: 100,
     },
+    latitude: {
+      type: Number,
+      required: false,
+    },
+    longitude: {
+      type: Number,
+      required: false,
+    },
     timestamp: {
       type: Date,
       default: Date.now,

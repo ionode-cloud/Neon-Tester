@@ -996,3 +996,211 @@ body {
   }
 }
 
+
+/* ─── Location Card ─────────────────────────────── */
+.loc-card {
+  cursor: default;
+  transition: all var(--transition-smooth);
+  grid-column: 1 / -1;
+}
+.loc-card.loc-card-active {
+  cursor: pointer;
+  border-color: rgba(0, 230, 118, 0.25);
+}
+.loc-card.loc-card-active:hover {
+  border-color: rgba(0, 230, 118, 0.5) !important;
+  box-shadow: 0 0 24px rgba(0, 230, 118, 0.2) !important;
+  transform: translateY(-2px);
+}
+
+.loc-map-hint {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--neon-cyan);
+  opacity: 0.75;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  transition: opacity var(--transition-fast);
+}
+.loc-card.loc-card-active:hover .loc-map-hint {
+  opacity: 1;
+}
+
+.loc-coords {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.loc-coord-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.loc-coord-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  width: 28px;
+  flex-shrink: 0;
+}
+
+.loc-coord-value {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--neon-green);
+  letter-spacing: 0.02em;
+}
+
+.loc-accuracy {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+}
+
+.loc-waiting,
+.loc-error {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.loc-error {
+  color: var(--neon-red);
+}
+
+@keyframes loc-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.loc-spin {
+  animation: loc-spin 1s linear infinite;
+}
+
+/* ─── Map Modal ─────────────────────────────────── */
+.map-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(8, 13, 26, 0.88);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  animation: fadeIn 0.25s ease both;
+}
+
+.map-modal {
+  width: 100%;
+  max-width: 900px;
+  height: min(80vh, 620px);
+  background: var(--bg-card);
+  border: 1px solid var(--border-glow);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 0 60px rgba(0, 229, 255, 0.15), var(--shadow-card);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: fadeInUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.map-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.875rem 1.25rem;
+  background: rgba(8, 13, 26, 0.9);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.map-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  flex-shrink: 0;
+}
+
+.map-device-chip {
+  background: rgba(0, 229, 255, 0.1);
+  border: 1px solid rgba(0, 229, 255, 0.25);
+  border-radius: 99px;
+  padding: 0.2rem 0.65rem;
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  color: var(--neon-cyan);
+}
+
+.map-modal-coords {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+}
+
+.map-accuracy-chip {
+  background: rgba(0, 230, 118, 0.12);
+  border: 1px solid rgba(0, 230, 118, 0.25);
+  border-radius: 99px;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.7rem;
+  font-family: var(--font-mono);
+  color: var(--neon-green);
+}
+
+.map-close-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: 0.4rem 0.65rem !important;
+}
+
+.map-container {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+}
+
+/* Map iframe fallback (shown if Google Maps is blocked) */
+.map-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-card);
+  padding: 2rem;
+  text-align: center;
+}
+
+@media (max-width: 640px) {
+  .map-modal {
+    height: 90vh;
+    border-radius: var(--radius-lg);
+  }
+  .map-modal-header {
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+  }
+  .map-modal-coords {
+    display: none;
+  }
+  .loc-coord-value {
+    font-size: 0.875rem;
+  }
+}

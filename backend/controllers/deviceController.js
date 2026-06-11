@@ -86,7 +86,7 @@ exports.getHistory = async (req, res) => {
 // Save a real device reading (called from Postman or real BT device)
 exports.postData = async (req, res) => {
   try {
-    const { deviceId, tiltAngle, height, voltageStatus, batterySOC } = req.body;
+    const { deviceId, tiltAngle, height, voltageStatus, batterySOC, latitude, longitude } = req.body;
 
     // Validate required fields
     const missing = [];
@@ -106,6 +106,8 @@ exports.postData = async (req, res) => {
           height: 12.5,
           voltageStatus: true,
           batterySOC: 78,
+          latitude: 28.6139,
+          longitude: 77.2090,
         },
       });
     }
@@ -117,6 +119,18 @@ exports.postData = async (req, res) => {
     if (batterySOC < 0 || batterySOC > 100) {
       return res.status(400).json({ success: false, error: 'batterySOC must be between 0 and 100' });
     }
+    if (latitude !== undefined && latitude !== null) {
+      const latVal = parseFloat(latitude);
+      if (isNaN(latVal) || latVal < -90 || latVal > 90) {
+        return res.status(400).json({ success: false, error: 'latitude must be a number between -90 and 90' });
+      }
+    }
+    if (longitude !== undefined && longitude !== null) {
+      const lngVal = parseFloat(longitude);
+      if (isNaN(lngVal) || lngVal < -180 || lngVal > 180) {
+        return res.status(400).json({ success: false, error: 'longitude must be a number between -180 and 180' });
+      }
+    }
 
     const reading = new DeviceData({
       deviceId,
@@ -124,6 +138,8 @@ exports.postData = async (req, res) => {
       height:        parseFloat(height),
       voltageStatus: Boolean(voltageStatus),
       batterySOC:    parseFloat(batterySOC),
+      latitude:      (latitude !== undefined && latitude !== null) ? parseFloat(latitude) : undefined,
+      longitude:     (longitude !== undefined && longitude !== null) ? parseFloat(longitude) : undefined,
       timestamp:     new Date(),
     });
 
@@ -155,7 +171,7 @@ exports.postData = async (req, res) => {
 // Saves a NEW reading with the updated fields, preserving the old reading in the database
 exports.putData = async (req, res) => {
   try {
-    const { id, _id, deviceId, tiltAngle, height, voltageStatus, batterySOC } = req.body;
+    const { id, _id, deviceId, tiltAngle, height, voltageStatus, batterySOC, latitude, longitude } = req.body;
     const targetId = id || _id || req.query.id || req.query._id;
     const targetDeviceId = deviceId || req.query.deviceId;
 
@@ -216,6 +232,30 @@ exports.putData = async (req, res) => {
         return res.status(400).json({ success: false, error: 'batterySOC must be a number between 0 and 100' });
       }
       newReading.batterySOC = parsedSOC;
+    }
+
+    if (latitude !== undefined) {
+      if (latitude === null) {
+        newReading.latitude = undefined;
+      } else {
+        const parsedLat = parseFloat(latitude);
+        if (isNaN(parsedLat) || parsedLat < -90 || parsedLat > 90) {
+          return res.status(400).json({ success: false, error: 'latitude must be a number between -90 and 90' });
+        }
+        newReading.latitude = parsedLat;
+      }
+    }
+
+    if (longitude !== undefined) {
+      if (longitude === null) {
+        newReading.longitude = undefined;
+      } else {
+        const parsedLng = parseFloat(longitude);
+        if (isNaN(parsedLng) || parsedLng < -180 || parsedLng > 180) {
+          return res.status(400).json({ success: false, error: 'longitude must be a number between -180 and 180' });
+        }
+        newReading.longitude = parsedLng;
+      }
     }
 
     await newReading.save();

@@ -65,7 +65,9 @@ Content-Type: application/json
   "tiltAngle": 45.2,
   "height": 12.5,
   "voltageStatus": true,
-  "batterySOC": 78.0
+  "batterySOC": 78.0,
+  "latitude": 28.6139,
+  "longitude": 77.2090
 }
 ```
 
@@ -76,6 +78,8 @@ Content-Type: application/json
 | `height` | number | ✅ | ≥ 0 | Height in metres |
 | `voltageStatus` | boolean | ✅ | true / false | `true` = Active, `false` = Inactive |
 | `batterySOC` | number | ✅ | 0 – 100 | Battery state of charge (%) |
+| `latitude` | number | ❌ | -90 to 90 | Optional GPS latitude coordinates |
+| `longitude` | number | ❌ | -180 to 180 | Optional GPS longitude coordinates |
 
 **Response `201 Created`**
 ```json
@@ -89,6 +93,8 @@ Content-Type: application/json
     "height": 12.5,
     "voltageStatus": true,
     "batterySOC": 78.0,
+    "latitude": 28.6139,
+    "longitude": 77.2090,
     "timestamp": "2026-06-10T16:00:00.000Z",
     "__v": 0
   }
@@ -106,7 +112,9 @@ Content-Type: application/json
   "tiltAngle": 45.2,
   "height": 12.5,
   "voltageStatus": true,
-  "batterySOC": 78.0
+  "batterySOC": 78.0,
+  "latitude": 28.6139,
+  "longitude": 77.2090
 }
 ```
 
@@ -194,6 +202,8 @@ Content-Type: application/json
 | `height` | number | ❌ | ≥ 0 | New height value |
 | `voltageStatus` | boolean | ❌ | true / false | New voltage status value |
 | `batterySOC` | number | ❌ | 0 – 100 | New battery SOC value |
+| `latitude` | number | ❌ | -90 to 90 | New latitude value |
+| `longitude` | number | ❌ | -180 to 180 | New longitude value |
 
 **Response `200 OK`**
 ```json
@@ -207,6 +217,8 @@ Content-Type: application/json
     "height": 12.5,
     "voltageStatus": true,
     "batterySOC": 75.0,
+    "latitude": 28.6139,
+    "longitude": 77.2090,
     "timestamp": "2026-06-10T16:00:00.000Z"
   }
 }
@@ -358,6 +370,8 @@ Content-Type: application/json
   height:        Number,     // metres (≥ 0)
   voltageStatus: Boolean,    // true = Active, false = Inactive
   batterySOC:    Number,     // 0–100 %
+  latitude:      Number,     // Optional latitude coordinates
+  longitude:     Number,     // Optional longitude coordinates
   timestamp:     Date        // Auto-set to Date.now
 }
 ```

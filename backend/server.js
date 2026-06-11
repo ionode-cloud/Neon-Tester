@@ -68,6 +68,8 @@ io.on('connection', (socket) => {
         height:        payload.height,
         voltageStatus: payload.voltageStatus,
         batterySOC:    payload.batterySOC,
+        latitude:      (payload.latitude !== undefined && payload.latitude !== null) ? parseFloat(payload.latitude) : undefined,
+        longitude:     (payload.longitude !== undefined && payload.longitude !== null) ? parseFloat(payload.longitude) : undefined,
         timestamp:     payload.timestamp || new Date(),
       });
       if (mongoose.connection.readyState === 1) {
