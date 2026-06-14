@@ -17,7 +17,7 @@ export default function useSocket() {
 
   useEffect(() => {
     const socket = io(SOCKET_URL, {
-      transports: ['websocket', 'polling'],
+      transports: ['polling', 'websocket'],
       reconnectionAttempts: 10,
       reconnectionDelay: 1000,
     });

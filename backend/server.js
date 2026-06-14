@@ -61,19 +61,32 @@ io.on('connection', (socket) => {
   // It is saved to MongoDB and broadcast to all other clients.
   socket.on('bluetoothData', async (payload) => {
     try {
-      const DeviceData = require('./models/DeviceData');
-      const reading = new DeviceData({
-        deviceId:      payload.deviceId || ctrl.getConnectionState().deviceId || 'ble_device',
+      console.log('[WS] bluetoothData received from client:', {
+        deviceId:      payload.deviceId,
         tiltAngle:     payload.tiltAngle,
         height:        payload.height,
         voltageStatus: payload.voltageStatus,
         batterySOC:    payload.batterySOC,
+        latitude:      payload.latitude,
+        longitude:     payload.longitude,
+      });
+
+      const DeviceData = require('./models/DeviceData');
+      const reading = new DeviceData({
+        deviceId:      payload.deviceId || ctrl.getConnectionState().deviceId || 'ble_device',
+        tiltAngle:     parseFloat(payload.tiltAngle),
+        height:        parseFloat(payload.height),
+        voltageStatus: Boolean(payload.voltageStatus),
+        batterySOC:    parseFloat(payload.batterySOC),
         latitude:      (payload.latitude !== undefined && payload.latitude !== null) ? parseFloat(payload.latitude) : undefined,
         longitude:     (payload.longitude !== undefined && payload.longitude !== null) ? parseFloat(payload.longitude) : undefined,
         timestamp:     payload.timestamp || new Date(),
       });
       if (mongoose.connection.readyState === 1) {
         await reading.save();
+        console.log('[WS] bluetoothData saved to MongoDB — id:', reading._id);
+      } else {
+        console.warn('[WS] MongoDB not connected — bluetoothData NOT saved');
       }
       io.emit('deviceData', { ...reading.toObject(), source: 'bluetooth' });
     } catch (err) {

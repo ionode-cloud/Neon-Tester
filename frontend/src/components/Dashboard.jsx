@@ -1,7 +1,10 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
-  RiDashboard3Line, RiDatabase2Line, RiBluetoothLine,
-  RiCompassLine, RiRulerLine, RiFlashlightLine, RiBatteryFill
+  RiDashboard3Line, RiDatabase2Line, RiBluetoothLine, RiBluetoothFill,
+  RiCompassLine, RiRulerLine, RiFlashlightLine, RiBatteryFill,
+  RiWifiLine, RiRefreshLine, RiLogoutBoxLine, RiDownloadLine,
+  RiSignalWifi3Line, RiCheckLine, RiCloseLine,
+  RiErrorWarningLine
 } from 'react-icons/ri';
 import { deviceApi } from '../services/api';
 import StatusCard from './StatusCard';
@@ -9,6 +12,40 @@ import BatteryBar from './BatteryBar';
 import LocationCard from './LocationCard';
 
 const MAX_HISTORY = 60;
+
+// ─── Signal strength bars helper ──────────────────────────────────────────
+function RssiBars({ rssi }) {
+  const level = rssi >= -60 ? 'rssi-strong' : rssi >= -70 ? 'rssi-medium' : rssi >= -80 ? 'rssi-weak' : 'rssi-poor';
+  return (
+    <div className={`rssi-bars ${level}`}>
+      <div className="rssi-bar" />
+      <div className="rssi-bar" />
+      <div className="rssi-bar" />
+      <div className="rssi-bar" />
+    </div>
+  );
+}
+
+// ─── Connection status badge
+function BtStatusBadge({ status }) {
+  const cfg = {
+    connected:    { label: 'Connected',     cls: 'bt-badge-connected',    dot: 'connected' },
+    connecting:   { label: 'Connecting…',   cls: 'bt-badge-connecting',   dot: 'pulsing' },
+    reconnecting: { label: 'Reconnecting…', cls: 'bt-badge-connecting',   dot: 'pulsing' },
+    fetching:     { label: 'Fetching Data', cls: 'bt-badge-fetching',     dot: 'pulsing' },
+    scanning:     { label: 'Scanning…',     cls: 'bt-badge-connecting',   dot: 'pulsing' },
+    disconnected: { label: 'Disconnected',  cls: 'bt-badge-disconnected', dot: 'disconnected' },
+    off:          { label: 'BT Off',        cls: 'bt-badge-disconnected', dot: 'disconnected' },
+    unsupported:  { label: 'Unsupported',   cls: 'bt-badge-disconnected', dot: 'disconnected' },
+  }[status] ?? { label: status, cls: 'bt-badge-disconnected', dot: 'disconnected' };
+
+  return (
+    <span className={`bt-status-badge ${cfg.cls}`}>
+      <span className={`status-dot ${cfg.dot}`} />
+      {cfg.label}
+    </span>
+  );
+}
 
 export default function Dashboard({
   deviceData,
@@ -18,20 +55,45 @@ export default function Dashboard({
   deviceInfo,
   isConnected,
   isPhysicalConnected,
+  connectionStatus,
+  discoveredDevices,
+  isScanning,
+  isConnecting,
+  isReconnecting,
+  isFetchingData,
+  fetchDataResult,
+  fetchDataError,
+  btError,
+  isBluetoothPoweredOn,
+  isBluetoothSupported,
+  onFetchData,
+  onConnect,
   onDisconnect,
   onReconnect,
+  onExit,
+  onScan,
+  onConnectDevice,
   pairTime,
   location,
   locationError,
   locationLoading,
 }) {
-  const [history, setHistory] = useState([]);
-  const [flashKey, setFlashKey] = useState(0);
-  const [lastUpdated, setLastUpdated] = useState(null);
-  const prevDataRef = useRef(null);
-  const prevUpdatedRef = useRef(null);
-  const prevDeletedRef = useRef(null);
+  const [history, setHistory]           = useState([]);
+  const [flashKey, setFlashKey]         = useState(0);
+  const [lastUpdated, setLastUpdated]   = useState(null);
+  const [showFetchResult, setShowFetchResult] = useState(false);
+
+  const prevDataRef       = useRef(null);
+  const prevUpdatedRef    = useRef(null);
+  const prevDeletedRef    = useRef(null);
   const prevAllDeletedRef = useRef(null);
+
+  // Auto-show fetch result when new data arrives
+  useEffect(() => {
+    if (fetchDataResult || fetchDataError) {
+      setShowFetchResult(true);
+    }
+  }, [fetchDataResult, fetchDataError]);
 
   useEffect(() => {
     const fetchLatest = () => {
@@ -110,15 +172,15 @@ export default function Dashboard({
       return prev.filter(item => {
         const itemId = item._id || item.id;
         const deletedId = lastDeletedEvent.id || lastDeletedEvent._id;
-        
+
         if (itemId && deletedId && itemId === deletedId) {
           return false;
         }
-        
+
         if (lastDeletedEvent.deviceId && item.deviceId === lastDeletedEvent.deviceId) {
           return false;
         }
-        
+
         return true;
       });
     });
@@ -161,8 +223,12 @@ export default function Dashboard({
     };
   }, [history]);
 
+  const isBusy = isConnecting || isReconnecting || isFetchingData || isScanning;
+
   return (
     <main className="dash-wrapper">
+
+      {/* ── Top Bar──────── */}
       <div className="dash-topBar">
         <div className="dash-topLeft">
           <RiDashboard3Line className="dash-topIcon" />
@@ -173,7 +239,10 @@ export default function Dashboard({
             </p>
           </div>
         </div>
+
         <div className="dash-topRight">
+
+          {/* Cloud Data */}
           <button
             id="btn-cloud-data"
             className="btn btn-ghost btn-sm"
@@ -186,21 +255,173 @@ export default function Dashboard({
             title="Open database history in another tab"
           >
             <RiDatabase2Line />
-            Cloud Data
+            <span className="btn-label">Cloud Data</span>
           </button>
 
+          {/* Fetch Data */}
           <button
-            id="btn-disconnect"
-            className="btn btn-danger btn-sm"
-            onClick={onDisconnect}
-            title="Disconnect Bluetooth device"
+            id="btn-fetch-data"
+            className="btn btn-success btn-sm"
+            onClick={onFetchData}
+            disabled={!isConnected || isBusy}
+            title={!isConnected ? 'Connect to a device first' : 'Fetch data from HC-05'}
           >
-            <RiBluetoothLine />
-            Disconnect
+            {isFetchingData ? (
+              <>
+                <div className="spinner" style={{ width: '14px', height: '14px', borderWidth: '2px' }} />
+                <span className="btn-label">Fetching…</span>
+              </>
+            ) : (
+              <>
+                <RiDownloadLine />
+                <span className="btn-label">Fetch Data</span>
+              </>
+            )}
+          </button>
+
+          {/* Disconnect (only when physically connected) */}
+          {isConnected && (
+            <button
+              id="btn-disconnect"
+              className="btn btn-danger btn-sm"
+              onClick={onDisconnect}
+              disabled={isBusy}
+              title="Disconnect Bluetooth device"
+            >
+              <RiBluetoothLine />
+              <span className="btn-label">Disconnect</span>
+            </button>
+          )}
+
+          {/* Reconnect — opens BLE picker and fully connects */}
+          {!isConnected && (
+            <button
+              id="btn-reconnect"
+              className="btn btn-warning btn-sm"
+              onClick={onConnect}
+              disabled={isBusy || !isBluetoothPoweredOn}
+              title="Open device picker and reconnect"
+            >
+              {isConnecting || isReconnecting ? (
+                <>
+                  <div className="spinner" style={{ width: '14px', height: '14px', borderWidth: '2px' }} />
+                  <span className="btn-label">Connecting…</span>
+                </>
+              ) : (
+                <>
+                  <RiRefreshLine />
+                  <span className="btn-label">Reconnect</span>
+                </>
+              )}
+            </button>
+          )}
+
+          {/* Exit button — always visible */}
+          <button
+            id="btn-exit"
+            className="btn btn-ghost btn-sm"
+            style={{
+              border: '1px solid rgba(255, 23, 68, 0.3)',
+              color: 'var(--neon-red)',
+              background: 'rgba(255, 23, 68, 0.05)',
+            }}
+            onClick={onExit}
+            title="Disconnect and return to Home"
+          >
+            <RiLogoutBoxLine />
+            <span className="btn-label">Exit</span>
           </button>
         </div>
       </div>
 
+      {/* ── BT Error banner */}
+      {btError && (
+        <div className="bt-error-banner animate-fadeIn">
+          <RiErrorWarningLine style={{ fontSize: '1.1rem', flexShrink: 0 }} />
+          <span className="text-sm">{btError}</span>
+        </div>
+      )}
+
+      {/* ── Bluetooth OFF banner  */}
+      {!isBluetoothPoweredOn && isBluetoothSupported && (
+        <div className="warn-banner animate-fadeIn">
+          <RiSignalWifi3Line style={{ fontSize: '1.25rem', flexShrink: 0 }} />
+          <div>
+            <strong style={{ display: 'block' }}>Bluetooth is OFF</strong>
+            <span className="text-xs">Please enable Bluetooth to scan or reconnect.</span>
+          </div>
+        </div>
+      )}
+
+      {/* ── Fetch Data Result Box ──────────────────────────────────────── */}
+      {showFetchResult && (fetchDataResult || fetchDataError) && (
+        <div className={`fetch-result-box animate-fadeInUp ${fetchDataError ? 'fetch-result-error' : 'fetch-result-success'}`}>
+          <div className="fetch-result-header">
+            <div className="fetch-result-title">
+              {fetchDataError
+                ? <><RiErrorWarningLine /> Fetch Failed</>              
+                : <><RiCheckLine /> Data Received from HC-05</>
+              }
+            </div>
+            <button
+              className="btn btn-ghost btn-sm"
+              style={{ padding: '0.2rem 0.4rem', minWidth: 'unset' }}
+              onClick={() => setShowFetchResult(false)}
+              title="Dismiss"
+            >
+              <RiCloseLine />
+            </button>
+          </div>
+          <div className="fetch-result-body font-mono">
+            {fetchDataError ? (
+              <span style={{ color: 'var(--neon-red)' }}>{fetchDataError}</span>
+            ) : fetchDataResult?._raw ? (
+              // Unrecognized format — show raw string
+              <>
+                <div style={{ color: 'var(--neon-yellow)', marginBottom: '0.5rem', fontSize: '0.75rem' }}>
+                  ⚠ Unrecognized data format — showing raw response:
+                </div>
+                <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                  {fetchDataResult._raw}
+                </pre>
+              </>
+            ) : fetchDataResult ? (
+              // Structured display of parsed HC-05 fields
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem 1.5rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.3rem 0', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                  <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>🔵 Tilt Angle</span>
+                  <span style={{ color: 'var(--neon-cyan)', fontWeight: 600 }}>
+                    {fetchDataResult.tiltAngle !== undefined ? `${parseFloat(fetchDataResult.tiltAngle).toFixed(1)}°` : '--'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.3rem 0', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                  <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>📏 Height</span>
+                  <span style={{ color: '#a78bfa', fontWeight: 600 }}>
+                    {fetchDataResult.height !== undefined ? `${parseFloat(fetchDataResult.height).toFixed(2)} m` : '--'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.3rem 0', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                  <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>⚡ Voltage</span>
+                  <span style={{ color: fetchDataResult.voltageStatus ? 'var(--neon-green)' : 'var(--neon-red)', fontWeight: 600 }}>
+                    {fetchDataResult.voltageStatus !== undefined ? (fetchDataResult.voltageStatus ? 'Active' : 'Inactive') : '--'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.3rem 0', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                  <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>🔋 Battery SOC</span>
+                  <span style={{
+                    color: fetchDataResult.batterySOC >= 60 ? 'var(--neon-green)' : fetchDataResult.batterySOC >= 30 ? 'var(--neon-yellow)' : 'var(--neon-red)',
+                    fontWeight: 600
+                  }}>
+                    {fetchDataResult.batterySOC !== undefined ? `${parseFloat(fetchDataResult.batterySOC).toFixed(1)}%` : '--'}
+                  </span>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      )}
+
+      {/* ── KPI Cards───── */}
       <div className="grid grid-4 dash-kpiGrid">
         <StatusCard
           key={`tilt-${flashKey}`}
@@ -229,16 +450,14 @@ export default function Dashboard({
         <StatusCard
           icon={<RiFlashlightLine />}
           label="Voltage Status"
+          value={current?.voltageStatus !== undefined && current?.voltageStatus !== null
+            ? (current.voltageStatus ? 'Active' : 'Inactive')
+            : '--'}
+          unit=""
           color={current?.voltageStatus ? 'green' : 'red'}
-          subLabel={undefined}
+          subLabel={stats ? `Uptime: ${stats.voltageUptime}%` : undefined}
           className="animate-fadeInUp stagger-3"
-        >
-          <div className={`badge ${current?.voltageStatus ? 'badge-active' : 'badge-inactive'}`}
-            style={{ fontSize: '0.9rem', padding: '0.4rem 1rem', marginTop: '0.25rem' }}>
-            <div className={`status-dot ${current?.voltageStatus ? 'connected' : 'disconnected'}`} />
-            {current?.voltageStatus ? 'Active' : 'Inactive'}
-          </div>
-        </StatusCard>
+        />
 
         <StatusCard
           key={`batt-${flashKey}`}

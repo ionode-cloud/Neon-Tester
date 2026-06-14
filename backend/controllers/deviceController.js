@@ -223,7 +223,10 @@ exports.putData = async (req, res) => {
     }
 
     if (voltageStatus !== undefined) {
-      newReading.voltageStatus = Boolean(voltageStatus);
+      if (typeof voltageStatus !== 'boolean' && voltageStatus !== 'true' && voltageStatus !== 'false' && voltageStatus !== 0 && voltageStatus !== 1) {
+        return res.status(400).json({ success: false, error: 'voltageStatus must be a boolean (true or false)' });
+      }
+      newReading.voltageStatus = voltageStatus === true || voltageStatus === 'true' || voltageStatus === 1;
     }
 
     if (batterySOC !== undefined) {

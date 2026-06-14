@@ -26,7 +26,7 @@ export default function Header({ deviceInfo, isConnected, isPhysicalConnected, i
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-        {isConnected && deviceInfo.name && deviceInfo.name !== 'Simulated Device' && (
+        {deviceInfo?.name && deviceInfo.name !== 'Simulated Device' && (
           <div className="header-deviceChip">
             <div className={`status-dot ${isPhysicalConnected ? 'connected' : 'disconnected'}`} />
             <span className="font-mono text-sm">{deviceInfo.name}</span>

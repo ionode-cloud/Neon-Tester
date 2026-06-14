@@ -12,16 +12,19 @@ import CloudDataView from './components/CloudDataView';
 
 
 export default function App() {
-  const [initialized, setInitialized] = useState(false);
+  const [initialized, setInitialized]     = useState(false);
   const [isCloudDataView, setIsCloudDataView] = useState(false);
-  const [pairTime, setPairTime] = useState(null);
-  const [wasConnected, setWasConnected] = useState(() => {
+  const [pairTime, setPairTime]           = useState(null);
+
+  // showDashboard stays TRUE after first successful connect.
+  // Only the Exit button sets it back to false.
+  const [showDashboard, setShowDashboard] = useState(() => {
     return !!localStorage.getItem('lastConnectedDevice');
   });
 
-
-
-
+  // fetchData result state (managed at App level so Dashboard can read it)
+  const [fetchDataResult, setFetchDataResult] = useState(null);
+  const [fetchDataError, setFetchDataError]   = useState(null);
 
   const [toasts, setToasts] = useState([]);
   const showToast = useCallback((message, type = 'info') => {
@@ -72,12 +75,16 @@ export default function App() {
     connect,
     connectDevice,
     disconnect,
+    reconnect,
+    fetchData,
+    parseFetchedData,
     startScanning,
     clearDiscoveredDevices,
     isConnected: btConnected,
     isScanning,
     isConnecting,
     isReconnecting,
+    isFetchingData,
     deviceInfo: btDeviceInfo,
     error: btError,
     discoveredDevices,
@@ -101,7 +108,7 @@ export default function App() {
           console.warn('[BT] Failed to report reconnect to backend:', err);
         }
       }
-      setWasConnected(true);
+      setShowDashboard(true);
     },
     onDeviceFound: (name) => {
       showToast(`Device found: ${name}`, 'info');
@@ -115,10 +122,12 @@ export default function App() {
   });
 
 
-  const isConnected = btConnected || wasConnected;
-  const { location, error: locationError, loading: locationLoading } = useLocation({ enabled: isConnected });
+  const { location, error: locationError, loading: locationLoading } = useLocation({
+    enabled: btConnected || showDashboard,
+  });
   latestLocationRef.current = location;
 
+  // Prefer live BT device info; fall back to what was saved in localStorage
   const deviceInfo = useMemo(() => {
     if (btConnected) return btDeviceInfo;
     const lastDeviceStr = localStorage.getItem('lastConnectedDevice');
@@ -135,12 +144,14 @@ export default function App() {
   const lastUpdated = deviceData?.timestamp ?? deviceData?._receivedAt;
 
 
+  // ── Scan (opens browser BLE picker) ─────────────────────────────────────
   const handleScan = useCallback(async () => {
     showToast('Opening BLE device picker — select a device to add it to the list.', 'info');
     await startScanning();
   }, [startScanning, showToast]);
 
 
+  // ── Connect (initial, from home screen) ─────────────────────────────────
   const handleConnect = useCallback(async () => {
     showToast('Opening native BLE chooser dialog...', 'info');
     const result = await connect();
@@ -148,41 +159,121 @@ export default function App() {
     if (result) {
       showToast(`Connected to ${result.name}!`, 'success');
       setPairTime(new Date());
+      setShowDashboard(true);
       await deviceApi.connect({ deviceName: result.name, deviceId: result.id });
       emitDeviceConnected({ deviceName: result.name, deviceId: result.id });
     }
   }, [connect, emitDeviceConnected, showToast]);
 
 
+  // ── Connect to a discovered device (from scan list) ──────────────────────
   const handleConnectDevice = useCallback(async (dev) => {
     showToast(`Connecting to ${dev.name}...`, 'info');
     const result = await connectDevice(dev);
 
     if (result) {
-      showToast(`Connected to ${dev.name}!`, 'success');
+      showToast(`Connected to ${result.name}!`, 'success');
       setPairTime(new Date());
+      setShowDashboard(true);
       await deviceApi.connect({ deviceName: result.name, deviceId: result.id });
       emitDeviceConnected({ deviceName: result.name, deviceId: result.id });
     }
   }, [connectDevice, showToast, emitDeviceConnected]);
 
 
+  // ── Disconnect — stays on Dashboard ─────────────────────────────────────
   const handleDisconnect = useCallback(async () => {
-    localStorage.removeItem('lastConnectedDevice');
-    setWasConnected(false);
-    setPairTime(null);
-
     const name = btConnected ? btDeviceInfo.name : deviceInfo.name;
+
     if (btConnected) {
       await disconnect();
     }
 
+    // Do NOT clear showDashboard — user stays on the dashboard
+    // Do NOT clear localStorage — we keep it for Reconnect
+
     if (name) {
       showToast(`Disconnected from ${name}`, 'warning');
       emitDeviceDisconnected({ deviceName: name });
-      await deviceApi.disconnect(name);
+      try { await deviceApi.disconnect(name); } catch {}
     }
   }, [btConnected, disconnect, emitDeviceDisconnected, btDeviceInfo, deviceInfo, showToast]);
+
+
+  // ── Reconnect — manual reconnect triggered from Dashboard ────────────────
+  const handleReconnect = useCallback(async () => {
+    showToast('Attempting to reconnect...', 'info');
+    const result = await reconnect();
+
+    if (result) {
+      showToast(`Reconnected to ${result.name}!`, 'success');
+      setPairTime(new Date());
+      try {
+        await deviceApi.connect({ deviceName: result.name, deviceId: result.id });
+        emitDeviceConnected({ deviceName: result.name, deviceId: result.id });
+      } catch {}
+    } else {
+      // reconnect() already set the error state; caller can open scan panel
+      showToast('Could not reconnect. Try scanning for devices.', 'warning');
+    }
+    // Returns null if device unavailable — Dashboard will open scan panel
+    return result;
+  }, [reconnect, showToast, emitDeviceConnected]);
+
+
+  // ── Fetch Data — sends GET_DATA command and waits for HC-05 response ───────
+  const handleFetchData = useCallback(async () => {
+    console.log('[App] handleFetchData triggered — requesting data from HC-05');
+    setFetchDataResult(null);
+    setFetchDataError(null);
+    try {
+      const raw = await fetchData();
+      console.log('[App] Raw data returned from fetchData():', raw);
+
+      // Parse HC-05 response (supports JSON and key=value formats)
+      const parsed = parseFetchedData(raw);
+
+      if (parsed) {
+        console.log('[App] Parsed HC-05 data — updating dashboard KPI cards:', parsed);
+        // Route through handleBluetoothData so KPI cards update immediately
+        // and the reading is saved to MongoDB via Socket.IO
+        handleBluetoothData(parsed);
+        setFetchDataResult(parsed);
+        showToast('Data fetched from HC-05 successfully!', 'success');
+      } else {
+        // Parser returned null — invalid data format
+        const errMsg = 'Invalid data format received from HC-05';
+        console.error('[App]', errMsg, '| raw:', raw);
+        setFetchDataError(errMsg);
+        // Still show raw string in result box
+        setFetchDataResult({ _raw: raw });
+        showToast(errMsg, 'error');
+      }
+    } catch (err) {
+      console.error('[App] Fetch Data error:', err.message);
+      setFetchDataError(err.message);
+      showToast(`Fetch failed: ${err.message}`, 'error');
+    }
+  }, [fetchData, parseFetchedData, handleBluetoothData, showToast]);
+
+
+  // ── Exit — disconnect + return to Home ───────────────────────────────────
+  const handleExit = useCallback(async () => {
+    if (btConnected) {
+      const name = btDeviceInfo.name;
+      await disconnect();
+      if (name) {
+        emitDeviceDisconnected({ deviceName: name });
+        try { await deviceApi.disconnect(name); } catch {}
+      }
+    }
+    // Clear persisted device so auto-reconnect doesn't fire on next load
+    localStorage.removeItem('lastConnectedDevice');
+    setShowDashboard(false);
+    setPairTime(null);
+    setFetchDataResult(null);
+    setFetchDataError(null);
+  }, [btConnected, disconnect, emitDeviceDisconnected, btDeviceInfo]);
 
 
   useEffect(() => {
@@ -217,6 +308,19 @@ export default function App() {
     );
   }
 
+  // Toast renderer (shared between both views)
+  const ToastLayer = (
+    <div className="toast-container" aria-live="polite">
+      {toasts.map(t => (
+        <div key={t.id} className={`toast toast-${t.type}`}>
+          <span className={`status-dot ${t.type === 'success' ? 'connected' : t.type === 'error' ? 'disconnected' : ''}`}
+            style={{ flexShrink: 0 }} />
+          <span className="text-sm">{t.message}</span>
+        </div>
+      ))}
+    </div>
+  );
+
   return (
     <>
       {}
@@ -226,14 +330,14 @@ export default function App() {
 
       <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
         <Header
-          deviceInfo={deviceInfo}
-          isConnected={isConnected}
+          deviceInfo={showDashboard ? deviceInfo : { name: null, id: null }}
+          isConnected={btConnected}
           isPhysicalConnected={btConnected}
           isSocketConnected={isSocketConnected}
           lastUpdated={lastUpdated}
         />
 
-        {!isConnected ? (
+        {!showDashboard ? (
           <ConnectionScreen
             onConnect={handleConnect}
             onConnectDevice={handleConnectDevice}
@@ -253,10 +357,26 @@ export default function App() {
             lastDeletedEvent={lastDeleted}
             lastAllDeletedEvent={lastAllDeleted}
             deviceInfo={deviceInfo}
-            isConnected={isConnected}
+            isConnected={btConnected}
             isPhysicalConnected={btConnected}
+            connectionStatus={connectionStatus}
+            discoveredDevices={discoveredDevices}
+            isScanning={isScanning}
+            isConnecting={isConnecting}
+            isReconnecting={isReconnecting}
+            isFetchingData={isFetchingData}
+            fetchDataResult={fetchDataResult}
+            fetchDataError={fetchDataError}
+            btError={btError}
+            isBluetoothPoweredOn={isBluetoothPoweredOn}
+            isBluetoothSupported={isBluetoothSupported}
+            onFetchData={handleFetchData}
+            onConnect={handleConnect}
             onDisconnect={handleDisconnect}
-            onReconnect={handleConnect}
+            onReconnect={handleReconnect}
+            onExit={handleExit}
+            onScan={handleScan}
+            onConnectDevice={handleConnectDevice}
             pairTime={pairTime}
             location={location}
             locationError={locationError}
@@ -264,6 +384,8 @@ export default function App() {
           />
         )}
       </div>
+
+      {ToastLayer}
     </>
   );
 }

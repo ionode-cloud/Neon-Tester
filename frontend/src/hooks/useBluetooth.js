@@ -15,6 +15,106 @@ const UART_PROFILES = [
   }
 ];
 
+// ─── HC-05 Data Parser ────────────────────────────────────────────────────────
+/**
+ * Parses HC-05 raw string into a structured data object.
+ * Supports two formats:
+ *   JSON:      {"tiltAngle":15,"height":120,"voltageStatus":48.5,"batterySOC":82}
+ *   Key=Value: TiltAngle:15,Height:120,VoltageStatus:48.5,BatterySOC:82
+ *
+ * Returns { tiltAngle, height, voltageStatus, batterySOC, timestamp } or null on failure.
+ */
+function parseHC05Data(raw) {
+  console.log('[HC-05] Raw data received:', raw);
+
+  if (!raw || typeof raw !== 'string') {
+    console.error('[HC-05] Invalid raw data — not a string:', raw);
+    return null;
+  }
+
+  const trimmed = raw.trim();
+
+  // ── Attempt 1: JSON parse ─────────────────────────────────────────────────
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      const result = {
+        tiltAngle:     parseFloat(parsed.tiltAngle     ?? parsed.TiltAngle     ?? 0),
+        height:        parseFloat(parsed.height        ?? parsed.Height        ?? 0),
+        voltageStatus: !!(parsed.voltageStatus ?? parsed.VoltageStatus ?? false),
+        batterySOC:    parseFloat(parsed.batterySOC    ?? parsed.BatterySOC    ?? 0),
+        timestamp:     new Date(),
+      };
+      console.log('[HC-05] JSON format parsed successfully:');
+      console.log('  → Tilt Angle   :', result.tiltAngle, '°');
+      console.log('  → Height       :', result.height, 'm');
+      console.log('  → Voltage Status:', result.voltageStatus ? 'Active' : 'Inactive');
+      console.log('  → Battery SOC  :', result.batterySOC, '%');
+      return result;
+    } catch (jsonErr) {
+      console.warn('[HC-05] JSON parse failed, trying key=value format:', jsonErr.message);
+    }
+  }
+
+  // ── Attempt 2: Key=Value parse (e.g. TiltAngle:15,Height:120,...) ──────────
+  try {
+    const pairs = {};
+    // Split by comma, then split each pair by first colon
+    trimmed.split(',').forEach(segment => {
+      const colonIdx = segment.indexOf(':');
+      if (colonIdx === -1) return;
+      const key = segment.slice(0, colonIdx).trim().toLowerCase().replace(/[_\s-]/g, '');
+      const val = segment.slice(colonIdx + 1).trim();
+      pairs[key] = val;
+    });
+
+    // Flexible key matching (case-insensitive, ignores separators)
+    const get = (...keys) => {
+      for (const k of keys) {
+        const normalized = k.toLowerCase().replace(/[_\s-]/g, '');
+        if (pairs[normalized] !== undefined) return pairs[normalized];
+      }
+      return undefined;
+    };
+
+    const tiltRaw     = get('tiltangle', 'tilt', 'angle');
+    const heightRaw   = get('height', 'ht');
+    const voltageRaw  = get('voltagestatus', 'voltage', 'volt', 'vs');
+    const batteryRaw  = get('batterysoc', 'battery', 'batt', 'soc');
+
+    if (tiltRaw === undefined && heightRaw === undefined && voltageRaw === undefined && batteryRaw === undefined) {
+      console.error('[HC-05] Key=Value parse failed — no recognizable fields found. Keys found:', Object.keys(pairs));
+      return null;
+    }
+
+    const result = {
+      tiltAngle:     tiltRaw    !== undefined ? parseFloat(tiltRaw)    : 0,
+      height:        heightRaw  !== undefined ? parseFloat(heightRaw)  : 0,
+      voltageStatus: voltageRaw !== undefined
+        ? (voltageRaw === 'true' || voltageRaw === '1' || voltageRaw === true)
+        : false,
+      batterySOC:    batteryRaw !== undefined ? parseFloat(batteryRaw) : 0,
+      timestamp:     new Date(),
+    };
+
+    // Validate parsed numbers
+    if (isNaN(result.tiltAngle) || isNaN(result.height) || isNaN(result.batterySOC)) {
+      console.error('[HC-05] Key=Value parse produced NaN values:', result);
+      return null;
+    }
+
+    console.log('[HC-05] Key=Value format parsed successfully:');
+    console.log('  → Tilt Angle    :', result.tiltAngle, '°');
+    console.log('  → Height        :', result.height, 'm');
+    console.log('  → Voltage Status:', result.voltageStatus ? 'Active' : 'Inactive');
+    console.log('  → Battery SOC   :', result.batterySOC, '%');
+    return result;
+  } catch (kvErr) {
+    console.error('[HC-05] Key=Value parse failed with error:', kvErr.message);
+    return null;
+  }
+}
+
 
 export default function useBluetooth({
   onData,
@@ -24,13 +124,14 @@ export default function useBluetooth({
   onBluetoothEnabled,
   onBluetoothDisabled,
 } = {}) {
-  const [isConnected, setIsConnected]     = useState(false);
-  const [isScanning, setIsScanning]       = useState(false);
-  const [isConnecting, setIsConnecting]   = useState(false);
-  const [isReconnecting, setIsReconnecting] = useState(false);
-  const [deviceInfo, setDeviceInfo]       = useState({ name: null, id: null });
-  const [error, setError]                 = useState(null);
-  const [deviceStatus, setDeviceStatus]   = useState(null);
+  const [isConnected, setIsConnected]         = useState(false);
+  const [isScanning, setIsScanning]           = useState(false);
+  const [isConnecting, setIsConnecting]       = useState(false);
+  const [isReconnecting, setIsReconnecting]   = useState(false);
+  const [isFetchingData, setIsFetchingData]   = useState(false);
+  const [deviceInfo, setDeviceInfo]           = useState({ name: null, id: null });
+  const [error, setError]                     = useState(null);
+  const [deviceStatus, setDeviceStatus]       = useState(null);
   const [isBluetoothPoweredOn, setIsBluetoothPoweredOn] = useState(true);
   const [discoveredDevices, setDiscoveredDevices]       = useState([]);
 
@@ -39,6 +140,9 @@ export default function useBluetooth({
   const characteristicRef = useRef(null);
   const isPoweredOnRef    = useRef(true);
   const knownDevicesRef   = useRef(new Map());
+  // Resolvers for the fetchData one-shot response
+  const fetchResolveRef   = useRef(null);
+  const fetchRejectRef    = useRef(null);
 
   const isBluetoothSupported = typeof navigator !== 'undefined' && !!navigator.bluetooth;
 
@@ -50,23 +154,36 @@ export default function useBluetooth({
         const decoder = new TextDecoder('utf-8');
         const raw = decoder.decode(value).trim();
 
-        if (raw === 'F') {
-          setDeviceStatus('F');
+        console.log('[HC-05] Notification received — raw bytes:', value.byteLength, 'bytes');
+        console.log('[HC-05] Decoded string:', raw);
+
+        // ── Device status flag (sent by HC-05 to signal ready state) ──────────
+        if (raw === 'F' || raw === 'OK' || raw === 'READY') {
+          console.log('[HC-05] Device status flag received:', raw);
+          setDeviceStatus(raw);
           return;
         }
 
-        const parsed = JSON.parse(raw);
-        if (onData && typeof onData === 'function') {
-          onData({
-            tiltAngle:     parseFloat(parsed.tiltAngle)     ?? 0,
-            height:        parseFloat(parsed.height)        ?? 0,
-            voltageStatus: Boolean(parsed.voltageStatus),
-            batterySOC:    parseFloat(parsed.batterySOC)    ?? 0,
-            timestamp:     new Date(),
-          });
+        // ── If there is a pending fetchData promise, resolve it first ──────────
+        if (fetchResolveRef.current) {
+          console.log('[HC-05] Resolving pending fetchData promise with raw data');
+          const resolve = fetchResolveRef.current;
+          fetchResolveRef.current = null;
+          fetchRejectRef.current  = null;
+          resolve(raw);
+          return;
         }
-      } catch {
 
+        // ── Live streaming data (continuous notifications) ─────────────────────
+        const parsed = parseHC05Data(raw);
+        if (parsed && onData && typeof onData === 'function') {
+          console.log('[HC-05] Streaming data — calling onData callback');
+          onData(parsed);
+        } else if (!parsed) {
+          console.warn('[HC-05] Could not parse streaming notification — data ignored');
+        }
+      } catch (err) {
+        console.error('[HC-05] handleNotification error:', err.message);
       }
     },
     [onData]
@@ -78,25 +195,29 @@ export default function useBluetooth({
 
     for (const profile of UART_PROFILES) {
       try {
-        console.log(`[BT] Attempting connection to service: ${profile.service}`);
+        console.log(`[BT] Attempting connection to UART service: ${profile.service}`);
         const service = await server.getPrimaryService(profile.service);
         const characteristic = await service.getCharacteristic(profile.characteristic);
 
         if (characteristic.properties.notify) {
           await characteristic.startNotifications();
           characteristic.addEventListener('characteristicvaluechanged', handleNotification);
+          console.log(`[BT] Subscribed to notifications on characteristic: ${profile.characteristic}`);
+        } else {
+          console.warn('[BT] Characteristic does not support notify — no live streaming available');
         }
         characteristicRef.current = characteristic;
 
-
+        // Send initial STATUS command so HC-05 knows we are ready
         try {
           const encoder = new TextEncoder();
           await characteristic.writeValue(encoder.encode('STATUS'));
+          console.log('[HC-05] Sent initial STATUS command to device');
         } catch (err) {
-          console.warn('[BT] Send STATUS command failed:', err.message);
+          console.warn('[HC-05] Send STATUS command failed (non-fatal):', err.message);
         }
 
-        console.log(`[BT] Successfully subscribed to service: ${profile.service}`);
+        console.log(`[BT] Successfully connected to UART profile on service: ${profile.service}`);
         success = true;
         break;
       } catch (err) {
@@ -116,6 +237,12 @@ export default function useBluetooth({
     setDeviceInfo({ name: null, id: null });
     characteristicRef.current = null;
     serverRef.current = null;
+    // Reject any pending fetchData on unexpected disconnect
+    if (fetchRejectRef.current) {
+      fetchRejectRef.current(new Error('Device disconnected during fetch'));
+      fetchResolveRef.current = null;
+      fetchRejectRef.current  = null;
+    }
   }, []);
 
 
@@ -330,6 +457,78 @@ export default function useBluetooth({
   }, [isBluetoothSupported, isBluetoothPoweredOn, handleGattDisconnected, setupCharacteristics, onReconnectSuccess]);
 
 
+  /**
+   * Manual reconnect — tries the existing deviceRef first, then falls
+   * back to the browser's permitted-device list (auto-reconnect path).
+   * Returns { name, id } on success, null on failure.
+   */
+  const reconnect = useCallback(async () => {
+    if (!isBluetoothSupported || !isBluetoothPoweredOn) return null;
+    setIsReconnecting(true);
+    setError(null);
+
+    try {
+      // 1) Try re-connecting to the existing device object (fastest)
+      if (deviceRef.current) {
+        try {
+          deviceRef.current.addEventListener('gattserverdisconnected', handleGattDisconnected);
+          const server = await deviceRef.current.gatt.connect();
+          serverRef.current = server;
+          await setupCharacteristics(server);
+
+          const name = deviceRef.current.name || 'Unknown Device';
+          const id   = deviceRef.current.id;
+          setIsConnected(true);
+          setDeviceInfo({ name, id });
+          localStorage.setItem('lastConnectedDevice', JSON.stringify({ id, name }));
+          if (onReconnectSuccess) onReconnectSuccess(name);
+          setIsReconnecting(false);
+          return { name, id };
+        } catch (err) {
+          console.warn('[BT] Direct reconnect failed, trying permitted devices:', err.message);
+        }
+      }
+
+      // 2) Fall back to permitted-device list
+      if (navigator.bluetooth.getDevices) {
+        const lastDeviceStr = localStorage.getItem('lastConnectedDevice');
+        if (lastDeviceStr) {
+          const lastDevice = JSON.parse(lastDeviceStr);
+          const devices = await navigator.bluetooth.getDevices();
+          const match = devices.find(d => d.id === lastDevice.id);
+
+          if (match) {
+            deviceRef.current = match;
+            match.addEventListener('gattserverdisconnected', handleGattDisconnected);
+            const server = await match.gatt.connect();
+            serverRef.current = server;
+            await setupCharacteristics(server);
+
+            const name = match.name || lastDevice.name || 'Unknown Device';
+            const id   = match.id;
+            setIsConnected(true);
+            setDeviceInfo({ name, id });
+            localStorage.setItem('lastConnectedDevice', JSON.stringify({ id, name }));
+            if (onReconnectSuccess) onReconnectSuccess(name);
+            setIsReconnecting(false);
+            return { name, id };
+          }
+        }
+      }
+
+      // 3) No known device — caller should open scan panel
+      setError('No previously paired device found. Please scan to pair again.');
+      setIsReconnecting(false);
+      return null;
+    } catch (err) {
+      console.warn('[BT] Reconnect failed:', err.message);
+      setError(err.message);
+      setIsReconnecting(false);
+      return null;
+    }
+  }, [isBluetoothSupported, isBluetoothPoweredOn, handleGattDisconnected, setupCharacteristics, onReconnectSuccess]);
+
+
   const connectDevice = useCallback(async (scannedDevice) => {
     if (!isBluetoothSupported || !isBluetoothPoweredOn) return null;
     setIsConnecting(true);
@@ -424,15 +623,86 @@ export default function useBluetooth({
   }, [isBluetoothPoweredOn, attemptAutoReconnect]);
 
 
+  /**
+   * fetchData — sends a FETCH command to the HC-05 and waits for the next
+   * BLE notification (up to 6 seconds). Resolves with the raw string
+   * received from the device, or rejects on timeout / disconnect.
+   */
+  const fetchData = useCallback(async () => {
+    if (!characteristicRef.current) {
+      console.error('[HC-05] fetchData called but no device is connected');
+      throw new Error('No device connected');
+    }
+
+    console.log('[HC-05] Fetch Data initiated — sending GET_DATA command to HC-05');
+    setIsFetchingData(true);
+
+    return new Promise((resolve, reject) => {
+      // Store resolve/reject so handleNotification can pick them up
+      fetchResolveRef.current = resolve;
+      fetchRejectRef.current  = reject;
+
+      // Send GET_DATA command (primary), fall back to FETCH if device uses older firmware
+      const sendCommand = async () => {
+        const encoder = new TextEncoder();
+        try {
+          await characteristicRef.current.writeValue(encoder.encode('GET_DATA'));
+          console.log('[HC-05] ✓ GET_DATA command sent to HC-05 — waiting for response…');
+        } catch (primaryErr) {
+          console.warn('[HC-05] GET_DATA failed, retrying with FETCH command:', primaryErr.message);
+          try {
+            await characteristicRef.current.writeValue(encoder.encode('FETCH'));
+            console.log('[HC-05] ✓ FETCH command sent to HC-05 (fallback) — waiting for response…');
+          } catch (fallbackErr) {
+            console.warn('[HC-05] Both commands failed to send — device may still push data autonomously:', fallbackErr.message);
+          }
+        }
+      };
+      sendCommand();
+
+      // Timeout after 5 seconds (per requirements)
+      const TIMEOUT_MS = 5000;
+      const timer = setTimeout(() => {
+        if (fetchResolveRef.current) {
+          fetchResolveRef.current = null;
+          fetchRejectRef.current  = null;
+          console.error(`[HC-05] ✗ No response from device within ${TIMEOUT_MS / 1000}s — timeout`);
+          reject(new Error(`No data received from HC-05 within ${TIMEOUT_MS / 1000} seconds`));
+        }
+      }, TIMEOUT_MS);
+
+      // Wrap resolve to clear timer and log success
+      const origResolve = resolve;
+      fetchResolveRef.current = (val) => {
+        clearTimeout(timer);
+        console.log('[HC-05] ✓ Response received from HC-05');
+        origResolve(val);
+      };
+    }).finally(() => {
+      setIsFetchingData(false);
+    });
+  }, []);
+
+  /**
+   * parseFetchedData — parses a raw HC-05 string into a structured object.
+   * Exported so App.jsx can use it after fetchData() resolves.
+   * Returns { tiltAngle, height, voltageStatus, batterySOC, timestamp } or null.
+   */
+  const parseFetchedData = useCallback((raw) => {
+    return parseHC05Data(raw);
+  }, []);
+
+
   const connectionStatus = useMemo(() => {
     if (!isBluetoothSupported) return 'unsupported';
     if (!isBluetoothPoweredOn) return 'off';
     if (isConnecting)          return 'connecting';
     if (isReconnecting)        return 'reconnecting';
+    if (isFetchingData)        return 'fetching';
     if (isConnected)           return 'connected';
     if (isScanning)            return 'scanning';
     return 'disconnected';
-  }, [isBluetoothSupported, isBluetoothPoweredOn, isConnecting, isReconnecting, isConnected, isScanning]);
+  }, [isBluetoothSupported, isBluetoothPoweredOn, isConnecting, isReconnecting, isFetchingData, isConnected, isScanning]);
 
   const sendCommand = useCallback(async (command) => {
     if (!characteristicRef.current) return;
@@ -448,7 +718,10 @@ export default function useBluetooth({
     connect,
     connectDevice,
     disconnect,
+    reconnect,
     sendCommand,
+    fetchData,
+    parseFetchedData,
     startScanning,
     stopScanning,
     clearDiscoveredDevices,
@@ -456,6 +729,7 @@ export default function useBluetooth({
     isScanning,
     isConnecting,
     isReconnecting,
+    isFetchingData,
     deviceInfo,
     error,
     deviceStatus,
