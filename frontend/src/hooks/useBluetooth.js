@@ -433,6 +433,9 @@ export default function useBluetooth({
     try {
       console.log(`[Classic-BT] Connecting to ${name} (${address})…`);
 
+      let finalName = name;
+      let finalId = address;
+
       if (isNativePlatform) {
         await BluetoothCommunication.connect({ address });
         connectedAddressRef.current = address;
@@ -446,7 +449,18 @@ export default function useBluetooth({
         } catch { /* non-fatal */ }
 
       } else if (device.isWebSerial) {
-        const port = selectedWebSerialPortRef.current;
+        let port = selectedWebSerialPortRef.current;
+        if (!port && 'serial' in navigator) {
+          try {
+            const ports = await navigator.serial.getPorts();
+            if (ports && ports.length > 0) {
+              port = ports[0];
+              selectedWebSerialPortRef.current = port;
+            }
+          } catch (portErr) {
+            console.warn('[Web Serial] Failed to retrieve paired ports:', portErr);
+          }
+        }
         if (!port) {
           throw new Error('No serial port selected. Please scan again.');
         }
@@ -456,7 +470,33 @@ export default function useBluetooth({
 
         connectedAddressRef.current = 'web-serial';
         setIsConnected(true);
-        setDeviceInfo({ name: 'HC-05 (Web Serial)', id: 'web-serial' });
+
+        // Determine friendly name and ID based on port info
+        let webSerialName = 'Web Serial Device';
+        let webSerialId = 'web-serial';
+        try {
+          const info = port.getInfo();
+          if (info && info.usbVendorId !== undefined && info.usbProductId !== undefined) {
+            const vidHex = info.usbVendorId.toString(16).padStart(4, '0').toUpperCase();
+            const pidHex = info.usbProductId.toString(16).padStart(4, '0').toUpperCase();
+            webSerialId = `${vidHex}:${pidHex}`;
+
+            let chipName = 'USB Serial';
+            if (info.usbVendorId === 0x1A86) chipName = 'CH340 USB Serial';
+            else if (info.usbVendorId === 0x0403) chipName = 'FTDI USB Serial';
+            else if (info.usbVendorId === 0x10C4) chipName = 'CP210x USB Serial';
+            else if (info.usbVendorId === 0x067B) chipName = 'PL2303 USB Serial';
+            else if (info.usbVendorId === 0x2341 || info.usbVendorId === 0x9025) chipName = 'Arduino USB Serial';
+
+            webSerialName = `${chipName} (${vidHex}:${pidHex})`;
+          }
+        } catch (infoErr) {
+          console.warn('[Web Serial] Failed to get port info:', infoErr);
+        }
+
+        setDeviceInfo({ name: webSerialName, id: webSerialId });
+        finalName = webSerialName;
+        finalId = webSerialId;
 
         // Start reading loop
         webSerialKeepReadingRef.current = true;
@@ -506,14 +546,14 @@ export default function useBluetooth({
 
       setIsConnecting(false);
       localStorage.setItem('lastConnectedDevice', JSON.stringify({
-        id: address,
-        name,
+        id: finalId,
+        name: finalName,
         address,
         isWebSerial: !!device.isWebSerial,
         isMock: !device.isWebSerial && !isNativePlatform
       }));
 
-      return { name, id: address };
+      return { name: finalName, id: finalId };
     } catch (err) {
       setIsConnecting(false);
       console.error('[Classic-BT] Connect failed:', err.message);

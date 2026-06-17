@@ -11,6 +11,7 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
+import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 
 // ─── Current app version — keep this in sync with android/app/build.gradle ──
@@ -85,100 +86,122 @@ export async function checkForUpdate() {
 export async function downloadApk(apkUrl, onProgress) {
   if (typeof onProgress !== 'function') onProgress = () => {};
 
-  // ── 1. Check available storage (Android only) ──────────────────────────────
-  // We can't easily read free space from JS, so we'll just let the write fail
-  // gracefully and report a meaningful error below.
-
-  // ── 2. Fetch the APK via a streaming request ───────────────────────────────
-  let response;
-  try {
-    response = await fetch(apkUrl, {
-      method: 'GET',
-    });
-  } catch (err) {
-    if (err.message.toLowerCase().includes('network') ||
-        err.message.toLowerCase().includes('failed to fetch')) {
-      throw new Error('Download failed: No internet connection.');
-    }
-    throw new Error(`Download failed: ${err.message}`);
-  }
-
-  if (!response.ok) {
-    throw new Error(`Download failed: Server returned HTTP ${response.status}.`);
-  }
-
-  // ── 3. Stream with progress tracking ──────────────────────────────────────
-  const contentLength = response.headers.get('Content-Length');
-  const totalBytes    = contentLength ? parseInt(contentLength, 10) : 0;
-
-  const reader  = response.body.getReader();
-  const chunks  = [];
-  let receivedBytes = 0;
-
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    let done, value;
-    try {
-      ({ done, value } = await reader.read());
-    } catch {
-      throw new Error('Download interrupted. Please try again.');
-    }
-    if (done) break;
-
-    chunks.push(value);
-    receivedBytes += value.length;
-
-    if (totalBytes > 0) {
-      onProgress(Math.min(99, Math.round((receivedBytes / totalBytes) * 100)));
-    } else {
-      // Unknown length — pulse progress up to 90
-      onProgress(Math.min(90, Math.round((receivedBytes / (receivedBytes + 500_000)) * 90)));
-    }
-  }
-
-  onProgress(99); // signal "processing"
-
-  // ── 4. Convert Uint8Array chunks → Base64 string for Capacitor write ───────
-  const totalLength  = chunks.reduce((sum, c) => sum + c.length, 0);
-  const merged       = new Uint8Array(totalLength);
-  let offset = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, offset);
-    offset += chunk.length;
-  }
-
-  // base64 encode
-  let binary = '';
-  const CHUNK = 8192;
-  for (let i = 0; i < merged.length; i += CHUNK) {
-    binary += String.fromCharCode(...merged.subarray(i, i + CHUNK));
-  }
-  const base64Data = btoa(binary);
-
-  // ── 5. Write to Capacitor Cache directory ──────────────────────────────────
   const fileName = `neon-tester-update.apk`;
-  try {
-    await Filesystem.writeFile({
-      path      : fileName,
-      data      : base64Data,
-      directory : Directory.Cache,
-    });
-  } catch (err) {
-    if (err.message && err.message.toLowerCase().includes('space')) {
-      throw new Error('Insufficient storage space. Please free up some space and try again.');
+
+  // On Native Platforms, use Filesystem.downloadFile for progress and native network performance
+  if (Capacitor.isNativePlatform()) {
+    let progressListener;
+    try {
+      progressListener = await Filesystem.addListener('progress', (progress) => {
+        if (progress.contentLength > 0) {
+          onProgress(Math.min(99, Math.round((progress.bytes / progress.contentLength) * 100)));
+        } else {
+          onProgress(50); // Fallback progress
+        }
+      });
+
+      await Filesystem.downloadFile({
+        url: apkUrl,
+        path: fileName,
+        directory: Directory.Cache,
+        progress: true
+      });
+    } catch (err) {
+      if (err.message && err.message.toLowerCase().includes('space')) {
+        throw new Error('Insufficient storage space. Please free up some space and try again.');
+      }
+      throw new Error(`Download failed: ${err.message}`);
+    } finally {
+      if (progressListener) {
+        try {
+          await progressListener.remove();
+        } catch (e) {
+          console.warn('[updateService] Failed to remove progress listener:', e);
+        }
+      }
     }
-    throw new Error(`Failed to save APK to device: ${err.message}`);
+  } else {
+    // Browser fallback: Use standard fetch streaming
+    let response;
+    try {
+      response = await fetch(apkUrl, {
+        method: 'GET',
+      });
+    } catch (err) {
+      if (err.message.toLowerCase().includes('network') ||
+          err.message.toLowerCase().includes('failed to fetch')) {
+        throw new Error('Download failed: No internet connection.');
+      }
+      throw new Error(`Download failed: ${err.message}`);
+    }
+
+    if (!response.ok) {
+      throw new Error(`Download failed: Server returned HTTP ${response.status}.`);
+    }
+
+    const contentLength = response.headers.get('Content-Length');
+    const totalBytes    = contentLength ? parseInt(contentLength, 10) : 0;
+
+    const reader  = response.body.getReader();
+    const chunks  = [];
+    let receivedBytes = 0;
+
+    while (true) {
+      let done, value;
+      try {
+        ({ done, value } = await reader.read());
+      } catch {
+        throw new Error('Download interrupted. Please try again.');
+      }
+      if (done) break;
+
+      chunks.push(value);
+      receivedBytes += value.length;
+
+      if (totalBytes > 0) {
+        onProgress(Math.min(99, Math.round((receivedBytes / totalBytes) * 100)));
+      } else {
+        onProgress(Math.min(90, Math.round((receivedBytes / (receivedBytes + 500_000)) * 90)));
+      }
+    }
+
+    onProgress(99);
+
+    const totalLength  = chunks.reduce((sum, c) => sum + c.length, 0);
+    const merged       = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+      merged.set(chunk, offset);
+      offset += chunk.length;
+    }
+
+    let binary = '';
+    const CHUNK = 8192;
+    for (let i = 0; i < merged.length; i += CHUNK) {
+      binary += String.fromCharCode(...merged.subarray(i, i + CHUNK));
+    }
+    const base64Data = btoa(binary);
+
+    try {
+      await Filesystem.writeFile({
+        path      : fileName,
+        data      : base64Data,
+        directory : Directory.Cache,
+      });
+    } catch (err) {
+      throw new Error(`Failed to save APK to device: ${err.message}`);
+    }
   }
 
   onProgress(100);
 
-  // ── 6. Return the full file URI for FileOpener ─────────────────────────────
+  // ── Return the full file URI for FileOpener ─────────────────────────────
   try {
     const uriResult = await Filesystem.getUri({
       path      : fileName,
       directory : Directory.Cache,
     });
-    return uriResult.uri; // e.g. file:///data/user/0/com.ionode.neontester/cache/neon-tester-update.apk
+    return uriResult.uri;
   } catch (err) {
     throw new Error(`Could not locate downloaded APK: ${err.message}`);
   }
