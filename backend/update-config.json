@@ -1,0 +1,7 @@
+{
+  "latestVersion": "1.0.0",
+  "versionCode": 1,
+  "apkUrl": "https://neontester.api.ionode.cloud/downloads/neon-tester-v1.0.0.apk",
+  "forceUpdate": false,
+  "releaseNotes": "Initial release."
+}

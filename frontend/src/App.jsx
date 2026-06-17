@@ -3,18 +3,31 @@ import React, { useCallback, useEffect, useState, useMemo, useRef } from 'react'
 import useBluetooth from './hooks/useBluetooth';
 import useSocket from './hooks/useSocket';
 import useLocation from './hooks/useLocation';
+import useAppUpdate from './hooks/useAppUpdate';
 import { deviceApi } from './services/api';
 
 import Header from './components/Header';
 import ConnectionScreen from './components/ConnectionScreen';
 import Dashboard from './components/Dashboard';
 import CloudDataView from './components/CloudDataView';
+import UpdateModal from './components/UpdateModal';
 
 
 export default function App() {
   const [initialized, setInitialized]     = useState(false);
   const [isCloudDataView, setIsCloudDataView] = useState(false);
   const [pairTime, setPairTime]           = useState(null);
+
+  // ── OTA Update system ───────────────────────────────────────────────────
+  const {
+    updateInfo,
+    isDownloading,
+    isInstalling,
+    downloadProgress,
+    error: updateError,
+    dismissUpdate,
+    triggerUpdate,
+  } = useAppUpdate();
 
   // showDashboard stays TRUE after first successful connect.
   // Only the Exit button sets it back to false.
@@ -25,6 +38,7 @@ export default function App() {
   // fetchData result state (managed at App level so Dashboard can read it)
   const [fetchDataResult, setFetchDataResult] = useState(null);
   const [fetchDataError, setFetchDataError]   = useState(null);
+  const [localDeviceData, setLocalDeviceData] = useState(null);
 
   const [toasts, setToasts] = useState([]);
   const showToast = useCallback((message, type = 'info') => {
@@ -65,7 +79,9 @@ export default function App() {
         ...data,
         latitude: currentLoc ? currentLoc.lat : null,
         longitude: currentLoc ? currentLoc.lng : null,
+        _receivedAt: Date.now(),
       };
+      setLocalDeviceData(dataWithLoc);
       emitBluetoothData(dataWithLoc);
     },
     [emitBluetoothData]
@@ -189,6 +205,8 @@ export default function App() {
       await disconnect();
     }
 
+    setLocalDeviceData(null);
+
     // Do NOT clear showDashboard — user stays on the dashboard
     // Do NOT clear localStorage — we keep it for Reconnect
 
@@ -273,6 +291,7 @@ export default function App() {
     setPairTime(null);
     setFetchDataResult(null);
     setFetchDataError(null);
+    setLocalDeviceData(null);
   }, [btConnected, disconnect, emitDeviceDisconnected, btDeviceInfo]);
 
 
@@ -285,6 +304,21 @@ export default function App() {
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <div className="spinner spinner-lg" />
       </div>
+    );
+  }
+
+  // ── Force update: block the entire app ──────────────────────────────────
+  if (updateInfo?.forceUpdate) {
+    return (
+      <UpdateModal
+        updateInfo={updateInfo}
+        isDownloading={isDownloading}
+        isInstalling={isInstalling}
+        downloadProgress={downloadProgress}
+        error={updateError}
+        onUpdate={triggerUpdate}
+        onDismiss={null}
+      />
     );
   }
 
@@ -352,7 +386,7 @@ export default function App() {
           />
         ) : (
           <Dashboard
-            deviceData={deviceData}
+            deviceData={deviceData || localDeviceData}
             lastUpdatedEvent={lastUpdatedEvent}
             lastDeletedEvent={lastDeleted}
             lastAllDeletedEvent={lastAllDeleted}
@@ -386,6 +420,19 @@ export default function App() {
       </div>
 
       {ToastLayer}
+
+      {/* ── OTA update modal (non-force — floats over app content) ── */}
+      {updateInfo && !updateInfo.forceUpdate && (
+        <UpdateModal
+          updateInfo={updateInfo}
+          isDownloading={isDownloading}
+          isInstalling={isInstalling}
+          downloadProgress={downloadProgress}
+          error={updateError}
+          onUpdate={triggerUpdate}
+          onDismiss={dismissUpdate}
+        />
+      )}
     </>
   );
 }

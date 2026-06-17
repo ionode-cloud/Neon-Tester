@@ -6,6 +6,7 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 
 const deviceRoutes = require('./routes/device');
+const updateRoutes = require('./routes/update');
 const ctrl = require('./controllers/deviceController');
 
 // ─── App Setup ─────────
@@ -14,7 +15,7 @@ const httpServer = http.createServer(app);
 
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.CLIENT_URL || 'http://localhost:3000',
+    origin: '*',
     methods: ['GET', 'POST'],
   },
 });
@@ -22,11 +23,33 @@ const io = new Server(httpServer, {
 app.set('io', io);
 
 // ─── Middleware ────────
-app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:3000' }));
+app.use(cors({ origin: '*' }));
 app.use(express.json());
+
+// ─── Static APK files (served for OTA update downloads) ────
+const path = require('path');
+
+const apkStaticOptions = {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.apk')) {
+      res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+      // Allow CORS for direct APK downloads from the Android app
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+  },
+};
+
+const apksDir = path.join(__dirname, 'uploads', 'apks');
+
+// Primary clean URL:  GET /downloads/neon-tester-vX.X.X.apk
+app.use('/downloads', express.static(apksDir, apkStaticOptions));
+
+// Legacy API path (kept for backward compatibility): GET /api/update/download/:file
+app.use('/api/update/download', express.static(apksDir, apkStaticOptions));
 
 // ─── Routes ───────────
 app.use('/device', deviceRoutes);
+app.use('/api/update', updateRoutes);
 
 // Support both /health and /api/health
 const healthHandler = (req, res) =>

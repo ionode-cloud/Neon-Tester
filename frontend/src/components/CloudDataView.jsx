@@ -114,16 +114,19 @@ export default function CloudDataView({ lastCreated, lastUpdated, lastDeleted, l
 
         <div className="dash-topRight" style={{ gap: '1rem' }}>
           <button onClick={handleExportCSV} className="btn btn-ghost btn-sm" disabled={!data.length}>
-            Export to CSV
+            Export CSV
           </button>
           <button onClick={fetchData} className="btn btn-ghost btn-sm">
             Refresh
           </button>
           <button onClick={handleClearAllData} className="btn btn-danger btn-sm" title="Delete all records from the database">
-            Clear All Data
+            Clear Data
           </button>
-          <button onClick={() => window.close()} className="btn btn-ghost btn-sm">
-            Close Tab
+          <button
+            onClick={() => window.location.replace(window.location.origin + window.location.pathname.replace(/\/$/, '') || '/')}
+            className="btn btn-ghost btn-sm"
+          >
+            Close
           </button>
         </div>
       </div>
