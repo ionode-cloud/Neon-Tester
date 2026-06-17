@@ -4,7 +4,7 @@ import {
   RiCompassLine, RiRulerLine, RiFlashlightLine, RiBatteryFill,
   RiWifiLine, RiRefreshLine, RiLogoutBoxLine, RiDownloadLine,
   RiSignalWifi3Line, RiCheckLine, RiCloseLine,
-  RiErrorWarningLine
+  RiErrorWarningLine, RiTerminalBoxLine, RiSendPlaneLine, RiDeleteBinLine
 } from 'react-icons/ri';
 import { deviceApi } from '../services/api';
 import StatusCard from './StatusCard';
@@ -77,12 +77,18 @@ export default function Dashboard({
   location,
   locationError,
   locationLoading,
+  serialLog = [],
+  onClearSerialLog,
+  onSendCommand,
 }) {
   const [history, setHistory]           = useState([]);
   const [flashKey, setFlashKey]         = useState(0);
   const [lastUpdated, setLastUpdated]   = useState(null);
   const [showFetchResult, setShowFetchResult] = useState(false);
+  const [serialCmdInput, setSerialCmdInput]   = useState('');
+  const [serialExpanded, setSerialExpanded]   = useState(true);
 
+  const serialLogEndRef   = useRef(null);
   const prevDataRef       = useRef(null);
   const prevUpdatedRef    = useRef(null);
   const prevDeletedRef    = useRef(null);
@@ -94,6 +100,13 @@ export default function Dashboard({
       setShowFetchResult(true);
     }
   }, [fetchDataResult, fetchDataError]);
+
+  // Auto-scroll serial log to bottom on new entries
+  useEffect(() => {
+    if (serialExpanded && serialLogEndRef.current) {
+      serialLogEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [serialLog, serialExpanded]);
 
   useEffect(() => {
     const fetchLatest = () => {
@@ -293,14 +306,14 @@ export default function Dashboard({
             </button>
           )}
 
-          {/* Reconnect — opens BLE picker and fully connects */}
+          {/* Reconnect — scans and reconnects to last device */}
           {!isConnected && (
             <button
               id="btn-reconnect"
               className="btn btn-warning btn-sm"
               onClick={onConnect}
               disabled={isBusy || !isBluetoothPoweredOn}
-              title="Open device picker and reconnect"
+              title="Scan and reconnect"
             >
               {isConnecting || isReconnecting ? (
                 <>
@@ -491,6 +504,157 @@ export default function Dashboard({
             }
           }}
         />
+      </div>
+
+      {/* ── Serial Monitor ───────────────────────────────────────── */}
+      <div className="glass animate-fadeInUp" style={{
+        marginTop: '0.5rem', borderRadius: '1rem',
+        border: '1px solid rgba(0,229,255,0.12)',
+        overflow: 'hidden',
+      }}>
+        {/* Header row */}
+        <div
+          onClick={() => setSerialExpanded(prev => !prev)}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '0.75rem 1.25rem', cursor: 'pointer',
+            borderBottom: serialExpanded ? '1px solid rgba(255,255,255,0.06)' : 'none',
+            userSelect: 'none',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+            <RiTerminalBoxLine style={{ fontSize: '1.1rem', color: 'var(--neon-cyan)' }} />
+            <span style={{ fontWeight: 700, fontSize: '0.875rem', color: 'var(--text-primary)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+              Serial Monitor
+            </span>
+            <span style={{
+              fontSize: '0.7rem', padding: '0.15rem 0.5rem', borderRadius: '999px',
+              background: 'rgba(0,229,255,0.1)', color: 'var(--neon-cyan)',
+              fontWeight: 600, fontFamily: 'monospace',
+            }}>
+              {serialLog.length} / 50
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            {onClearSerialLog && serialLog.length > 0 && (
+              <button
+                className="btn btn-ghost btn-sm"
+                style={{ padding: '0.2rem 0.5rem', fontSize: '0.72rem', color: 'var(--text-muted)' }}
+                onClick={(e) => { e.stopPropagation(); onClearSerialLog(); }}
+                title="Clear serial log"
+              >
+                <RiDeleteBinLine style={{ fontSize: '0.9rem' }} />
+              </button>
+            )}
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+              {serialExpanded ? '▲' : '▼'}
+            </span>
+          </div>
+        </div>
+
+        {serialExpanded && (
+          <div>
+            {/* Log scrollable area */}
+            <div
+              className="font-mono"
+              style={{
+                maxHeight: '220px', overflowY: 'auto', padding: '0.75rem 1rem',
+                fontSize: '0.72rem', lineHeight: '1.6',
+                background: 'rgba(0,0,0,0.25)',
+              }}
+            >
+              {serialLog.length === 0 ? (
+                <div style={{ color: 'var(--text-muted)', fontStyle: 'italic', textAlign: 'center', padding: '1rem 0' }}>
+                  No incoming data yet. Connect to HC-05 / ESP32 to see serial output.
+                </div>
+              ) : (
+                serialLog.map((entry, idx) => {
+                  const ts = new Intl.DateTimeFormat('en-US', {
+                    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+                  }).format(entry.timestamp);
+
+                  return (
+                    <div
+                      key={idx}
+                      style={{
+                        display: 'flex', gap: '0.75rem', alignItems: 'flex-start',
+                        padding: '0.2rem 0',
+                        borderBottom: '1px solid rgba(255,255,255,0.04)',
+                      }}
+                    >
+                      {/* Timestamp */}
+                      <span style={{ color: 'var(--text-muted)', flexShrink: 0, minWidth: '65px' }}>
+                        {ts}
+                      </span>
+
+                      {/* Raw message */}
+                      <span style={{ color: 'var(--neon-cyan)', wordBreak: 'break-all', flex: 1 }}>
+                        {entry.raw}
+                      </span>
+
+                      {/* Parsed summary */}
+                      {entry.parsed && (
+                        <span style={{
+                          color: 'var(--neon-green)', flexShrink: 0,
+                          fontSize: '0.68rem', whiteSpace: 'nowrap',
+                        }}>
+                          T:{entry.parsed.tiltAngle?.toFixed(1)}°
+                          &nbsp;H:{entry.parsed.height?.toFixed(1)}m
+                          &nbsp;B:{entry.parsed.batterySOC?.toFixed(0)}%
+                        </span>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+              <div ref={serialLogEndRef} />
+            </div>
+
+            {/* Send Command Input */}
+            {isConnected && onSendCommand && (
+              <div style={{
+                display: 'flex', gap: '0.5rem', padding: '0.6rem 1rem',
+                borderTop: '1px solid rgba(255,255,255,0.06)',
+                background: 'rgba(0,0,0,0.15)',
+              }}>
+                <input
+                  id="serial-cmd-input"
+                  type="text"
+                  value={serialCmdInput}
+                  onChange={(e) => setSerialCmdInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && serialCmdInput.trim()) {
+                      onSendCommand(serialCmdInput.trim());
+                      setSerialCmdInput('');
+                    }
+                  }}
+                  placeholder="Send command (e.g. GET_DATA)"
+                  className="font-mono"
+                  style={{
+                    flex: 1, background: 'rgba(255,255,255,0.05)',
+                    border: '1px solid rgba(0,229,255,0.2)', borderRadius: '0.5rem',
+                    padding: '0.4rem 0.75rem', fontSize: '0.78rem',
+                    color: 'var(--text-primary)', outline: 'none',
+                  }}
+                />
+                <button
+                  id="btn-send-serial-cmd"
+                  className="btn btn-primary btn-sm"
+                  disabled={!serialCmdInput.trim()}
+                  onClick={() => {
+                    if (serialCmdInput.trim()) {
+                      onSendCommand(serialCmdInput.trim());
+                      setSerialCmdInput('');
+                    }
+                  }}
+                  title="Send command"
+                >
+                  <RiSendPlaneLine />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </main>
   );

@@ -92,10 +92,12 @@ export default function App() {
     connectDevice,
     disconnect,
     reconnect,
+    sendCommand,
     fetchData,
     parseFetchedData,
     startScanning,
     clearDiscoveredDevices,
+    clearSerialLog,
     isConnected: btConnected,
     isScanning,
     isConnecting,
@@ -107,6 +109,7 @@ export default function App() {
     isBluetoothPoweredOn,
     connectionStatus,
     isBluetoothSupported,
+    serialLog,
   } = useBluetooth({
     onData: handleBluetoothData,
     onBluetoothPowerOffWhileConnected: () => {
@@ -160,26 +163,42 @@ export default function App() {
   const lastUpdated = deviceData?.timestamp ?? deviceData?._receivedAt;
 
 
-  // ── Scan (opens browser BLE picker) ─────────────────────────────────────
+  // ── Scan: triggers direct scan and connection ────────────────────────────
   const handleScan = useCallback(async () => {
-    showToast('Opening BLE device picker — select a device to add it to the list.', 'info');
-    await startScanning();
-  }, [startScanning, showToast]);
-
-
-  // ── Connect (initial, from home screen) ─────────────────────────────────
-  const handleConnect = useCallback(async () => {
-    showToast('Opening native BLE chooser dialog...', 'info');
+    showToast('Initiating Bluetooth Classic scan and connect…', 'info');
     const result = await connect();
 
     if (result) {
       showToast(`Connected to ${result.name}!`, 'success');
       setPairTime(new Date());
       setShowDashboard(true);
-      await deviceApi.connect({ deviceName: result.name, deviceId: result.id });
-      emitDeviceConnected({ deviceName: result.name, deviceId: result.id });
+      try {
+        await deviceApi.connect({ deviceName: result.name, deviceId: result.id });
+        emitDeviceConnected({ deviceName: result.name, deviceId: result.id });
+      } catch (err) {
+        console.warn('[BT] Failed to report connection to backend:', err);
+      }
     }
-  }, [connect, emitDeviceConnected, showToast]);
+  }, [connect, showToast, emitDeviceConnected]);
+
+
+  // ── Connect (initial, from home screen) — direct scan and connection ────
+  const handleConnect = useCallback(async () => {
+    showToast('Initiating Bluetooth Classic scan and connect…', 'info');
+    const result = await connect();
+
+    if (result) {
+      showToast(`Connected to ${result.name}!`, 'success');
+      setPairTime(new Date());
+      setShowDashboard(true);
+      try {
+        await deviceApi.connect({ deviceName: result.name, deviceId: result.id });
+        emitDeviceConnected({ deviceName: result.name, deviceId: result.id });
+      } catch (err) {
+        console.warn('[BT] Failed to report connection to backend:', err);
+      }
+    }
+  }, [connect, showToast, emitDeviceConnected]);
 
 
   // ── Connect to a discovered device (from scan list) ──────────────────────
@@ -415,6 +434,9 @@ export default function App() {
             location={location}
             locationError={locationError}
             locationLoading={locationLoading}
+            serialLog={serialLog}
+            onClearSerialLog={clearSerialLog}
+            onSendCommand={sendCommand}
           />
         )}
       </div>

@@ -51,8 +51,8 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
-    <!-- Declare BLE feature -->
-    <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
+    <!-- Declare Bluetooth Classic feature (BR/EDR) -->
+    <uses-feature android:name="android.hardware.bluetooth" android:required="true" />
 
     <!-- OTA Update: permission to install APKs from within the app (Android 8+) -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />

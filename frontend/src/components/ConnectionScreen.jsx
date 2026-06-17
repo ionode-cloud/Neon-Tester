@@ -34,7 +34,7 @@ export default function ConnectionScreen({
         {!isBluetoothSupported && (
           <div className="conn-errorBox" style={{ marginBottom: '2rem', width: '100%', maxWidth: '500px' }}>
             <RiSignalWifiErrorLine style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }} />
-            <p className="text-sm">Web Bluetooth is not supported. Use Chrome or Edge on desktop.</p>
+            <p className="text-sm">Bluetooth Classic is only supported on Android. Use the Android app to connect.</p>
           </div>
         )}
 
@@ -45,15 +45,15 @@ export default function ConnectionScreen({
 
         <h2 className="conn-heading font-display" style={{ fontSize: '1.75rem', marginBottom: '0.5rem' }}>
           {connectionStatus === 'off' ? 'Bluetooth OFF' :
-            connectionStatus === 'scanning' ? 'Opening Device Picker…' :
+            connectionStatus === 'scanning' ? 'Scanning for Devices…' :
               connectionStatus === 'connecting' ? 'Connecting to Device…' : 'Bluetooth Monitoring'}
         </h2>
         <p className="conn-description" style={{ fontSize: '0.875rem', marginBottom: '1.5rem', maxWidth: '480px' }}>
           {connectionStatus === 'off'
-            ? 'Enable your system Bluetooth adapter and click scan to begin.'
+            ? 'Enable your system Bluetooth adapter and click Scan to begin.'
             : connectionStatus === 'scanning'
-              ? 'Select a device from the browser dialog to pair and connect.'
-              : 'Click Scan & Connect Device to open the BLE picker.'}
+              ? 'Loading paired Bluetooth Classic devices…'
+              : 'Click Scan Devices to load your paired HC-05, HC-06, or ESP32 SPP devices.'}
         </p>
 
         {error && (
@@ -68,20 +68,78 @@ export default function ConnectionScreen({
             className="btn btn-primary btn-md conn-connectBtn"
             onClick={onScan}
             disabled={connectionStatus === 'scanning'}
-            aria-label="Scan for BLE devices"
+            aria-label="Scan for Bluetooth Classic devices"
           >
             {connectionStatus === 'scanning' ? (
               <>
                 <div className="spinner" style={{ width: '16px', height: '16px', borderWidth: '2px', marginRight: '4px' }} />
-                Opening BLE Picker…
+                Scanning…
               </>
             ) : (
               <>
                 <RiBluetoothFill style={{ fontSize: '1.1rem' }} />
-                Scan & Connect Device
+                Scan Devices
               </>
             )}
           </button>
+        )}
+
+        {/* ── Discovered / Paired Device List ─────────────────────────────── */}
+        {discoveredDevices && discoveredDevices.length > 0 && (
+          <div style={{ width: '100%', maxWidth: '500px', marginTop: '1.5rem' }}>
+            <div style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              marginBottom: '0.75rem'
+            }}>
+              <span className="text-sm" style={{ color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                Bluetooth Devices ({discoveredDevices.length})
+              </span>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={onClearDevices}
+                style={{ padding: '0.2rem 0.6rem', fontSize: '0.75rem' }}
+              >
+                Clear
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {discoveredDevices.map(dev => (
+                <div
+                  key={dev.id}
+                  className="glass"
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '0.75rem 1rem', borderRadius: '0.75rem',
+                    border: '1px solid rgba(0,229,255,0.15)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <RiBluetoothFill style={{ fontSize: '1.1rem', color: 'var(--neon-cyan)', flexShrink: 0 }} />
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--text-primary)' }}>
+                        {dev.name}
+                      </div>
+                      <div className="font-mono" style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                        {dev.address || dev.id}
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    id={`btn-connect-${(dev.address || dev.id).replace(/:/g, '-')}`}
+                    className="btn btn-primary btn-sm"
+                    onClick={() => onConnectDevice(dev)}
+                    disabled={connectionStatus === 'connecting'}
+                    style={{ flexShrink: 0, marginLeft: '0.5rem' }}
+                  >
+                    {connectionStatus === 'connecting' ? (
+                      <div className="spinner" style={{ width: '12px', height: '12px', borderWidth: '2px' }} />
+                    ) : 'Connect'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
       </div>
     </main>

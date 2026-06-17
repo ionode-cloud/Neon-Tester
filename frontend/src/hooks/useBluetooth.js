@@ -1,37 +1,16 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { BleClient, numberToUUID } from '@capacitor-community/bluetooth-le';
+import { BluetoothCommunication } from '@yesprasoon/capacitor-bluetooth-communication';
 
 // ─── Platform detection ───────────────────────────────────────────────────────
 const isNativePlatform = Capacitor.isNativePlatform();
 
-// ─── Service / Characteristic UUIDs ───────────────────────────────────────────
-// Capacitor BLE requires full 128-bit UUIDs for 16-bit services
-const HM10_SERVICE_UUID      = numberToUUID(0xffe0);           // "0000ffe0-0000-1000-8000-00805f9b34fb"
-const HM10_CHAR_UUID         = numberToUUID(0xffe1);           // "0000ffe1-0000-1000-8000-00805f9b34fb"
-const NORDIC_NUS_SERVICE     = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
-const NORDIC_NUS_TX_CHAR     = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
-const NORDIC_NUS_RX_CHAR     = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
+// ─── Serial log cap ───────────────────────────────────────────────────────────
+const MAX_SERIAL_LOG = 50;
 
-// For Web Bluetooth fallback (uses short 16-bit notation)
-const HM10_SERVICE_SHORT     = 0xffe0;
-const OPTIONAL_SERVICES      = [HM10_SERVICE_SHORT, NORDIC_NUS_SERVICE];
-
-const UART_PROFILES = [
-  { service: HM10_SERVICE_UUID,  rxChar: HM10_CHAR_UUID,    txChar: HM10_CHAR_UUID },
-  { service: NORDIC_NUS_SERVICE, rxChar: NORDIC_NUS_RX_CHAR, txChar: NORDIC_NUS_TX_CHAR },
-];
-
-// Web Bluetooth profiles (short UUIDs)
-const WEB_UART_PROFILES = [
-  { service: HM10_SERVICE_SHORT, characteristic: 0xffe1 },
-  { service: NORDIC_NUS_SERVICE, characteristic: NORDIC_NUS_TX_CHAR },
-];
-
-
-// ─── HC-05 Data Parser ────────────────────────────────────────────────────────
+// ─── HC-05 / ESP32 SPP Data Parser ───────────────────────────────────────────
 /**
- * Parses HC-05 raw string into a structured data object.
+ * Parses incoming serial string into a structured data object.
  * Supports two formats:
  *   JSON:      {"tiltAngle":15,"height":120,"voltageStatus":48.5,"batterySOC":82}
  *   Key=Value: TiltAngle:15,Height:120,VoltageStatus:48.5,BatterySOC:82
@@ -39,10 +18,10 @@ const WEB_UART_PROFILES = [
  * Returns { tiltAngle, height, voltageStatus, batterySOC, timestamp } or null on failure.
  */
 function parseHC05Data(raw) {
-  console.log('[HC-05] Raw data received:', raw);
+  console.log('[Classic-BT] Raw data received:', raw);
 
   if (!raw || typeof raw !== 'string') {
-    console.error('[HC-05] Invalid raw data — not a string:', raw);
+    console.error('[Classic-BT] Invalid raw data — not a string:', raw);
     return null;
   }
 
@@ -53,27 +32,25 @@ function parseHC05Data(raw) {
     try {
       const parsed = JSON.parse(trimmed);
       const result = {
-        tiltAngle:     parseFloat(parsed.tiltAngle     ?? parsed.TiltAngle     ?? 0),
-        height:        parseFloat(parsed.height        ?? parsed.Height        ?? 0),
+        tiltAngle: parseFloat(parsed.tiltAngle ?? parsed.TiltAngle ?? 0),
+        height: parseFloat(parsed.height ?? parsed.Height ?? 0),
         voltageStatus: !!(parsed.voltageStatus ?? parsed.VoltageStatus ?? false),
-        batterySOC:    parseFloat(parsed.batterySOC    ?? parsed.BatterySOC    ?? 0),
-        timestamp:     new Date(),
+        batterySOC: parseFloat(parsed.batterySOC ?? parsed.BatterySOC ?? 0),
+        timestamp: new Date(),
       };
-      console.log('[HC-05] JSON format parsed successfully:');
-      console.log('  → Tilt Angle   :', result.tiltAngle, '°');
-      console.log('  → Height       :', result.height, 'm');
+      console.log('  → Tilt Angle    :', result.tiltAngle, '°');
+      console.log('  → Height        :', result.height, 'm');
       console.log('  → Voltage Status:', result.voltageStatus ? 'Active' : 'Inactive');
-      console.log('  → Battery SOC  :', result.batterySOC, '%');
+      console.log('  → Battery SOC   :', result.batterySOC, '%');
       return result;
     } catch (jsonErr) {
-      console.warn('[HC-05] JSON parse failed, trying key=value format:', jsonErr.message);
+      console.warn('[Classic-BT] JSON parse failed, trying key=value format:', jsonErr.message);
     }
   }
 
   // ── Attempt 2: Key=Value parse (e.g. TiltAngle:15,Height:120,...) ──────────
   try {
     const pairs = {};
-    // Split by comma, then split each pair by first colon
     trimmed.split(',').forEach(segment => {
       const colonIdx = segment.indexOf(':');
       if (colonIdx === -1) return;
@@ -82,7 +59,6 @@ function parseHC05Data(raw) {
       pairs[key] = val;
     });
 
-    // Flexible key matching (case-insensitive, ignores separators)
     const get = (...keys) => {
       for (const k of keys) {
         const normalized = k.toLowerCase().replace(/[_\s-]/g, '');
@@ -91,64 +67,49 @@ function parseHC05Data(raw) {
       return undefined;
     };
 
-    const tiltRaw     = get('tiltangle', 'tilt', 'angle');
-    const heightRaw   = get('height', 'ht');
-    const voltageRaw  = get('voltagestatus', 'voltage', 'volt', 'vs');
-    const batteryRaw  = get('batterysoc', 'battery', 'batt', 'soc');
+    const tiltRaw = get('tiltangle', 'tilt', 'angle');
+    const heightRaw = get('height', 'ht');
+    const voltageRaw = get('voltagestatus', 'voltage', 'volt', 'vs');
+    const batteryRaw = get('batterysoc', 'battery', 'batt', 'soc');
 
     if (tiltRaw === undefined && heightRaw === undefined && voltageRaw === undefined && batteryRaw === undefined) {
-      console.error('[HC-05] Key=Value parse failed — no recognizable fields found. Keys found:', Object.keys(pairs));
+      console.error('[Classic-BT] Key=Value parse failed — no recognizable fields. Keys found:', Object.keys(pairs));
       return null;
     }
 
     const result = {
-      tiltAngle:     tiltRaw    !== undefined ? parseFloat(tiltRaw)    : 0,
-      height:        heightRaw  !== undefined ? parseFloat(heightRaw)  : 0,
+      tiltAngle: tiltRaw !== undefined ? parseFloat(tiltRaw) : 0,
+      height: heightRaw !== undefined ? parseFloat(heightRaw) : 0,
       voltageStatus: voltageRaw !== undefined
         ? (voltageRaw === 'true' || voltageRaw === '1' || voltageRaw === true)
         : false,
-      batterySOC:    batteryRaw !== undefined ? parseFloat(batteryRaw) : 0,
-      timestamp:     new Date(),
+      batterySOC: batteryRaw !== undefined ? parseFloat(batteryRaw) : 0,
+      timestamp: new Date(),
     };
 
-    // Validate parsed numbers
     if (isNaN(result.tiltAngle) || isNaN(result.height) || isNaN(result.batterySOC)) {
-      console.error('[HC-05] Key=Value parse produced NaN values:', result);
+      console.error('[Classic-BT] Key=Value parse produced NaN values:', result);
       return null;
     }
 
-    console.log('[HC-05] Key=Value format parsed successfully:');
     console.log('  → Tilt Angle    :', result.tiltAngle, '°');
     console.log('  → Height        :', result.height, 'm');
     console.log('  → Voltage Status:', result.voltageStatus ? 'Active' : 'Inactive');
     console.log('  → Battery SOC   :', result.batterySOC, '%');
     return result;
   } catch (kvErr) {
-    console.error('[HC-05] Key=Value parse failed with error:', kvErr.message);
+    console.error('[Classic-BT] Key=Value parse failed with error:', kvErr.message);
     return null;
   }
 }
 
 
-// ─── Helper: encode string → DataView (for Capacitor BLE writes) ──────────────
-function textToDataView(str) {
-  const encoder = new TextEncoder();
-  const bytes = encoder.encode(str);
-  return new DataView(bytes.buffer);
-}
-
-// ─── Helper: DataView → string ────────────────────────────────────────────────
-function dataViewToString(dataView) {
-  const decoder = new TextDecoder('utf-8');
-  return decoder.decode(new Uint8Array(dataView.buffer, dataView.byteOffset, dataView.byteLength)).trim();
-}
-
-
 // ═══════════════════════════════════════════════════════════════════════════════
-// NATIVE CAPACITOR BLE IMPLEMENTATION
+// BLUETOOTH CLASSIC HOOK (uses @yesprasoon/capacitor-bluetooth-communication)
+// Supports HC-05, HC-06, ESP32 SPP, and all RFCOMM/SPP serial devices.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function useCapacitorBluetooth({
+export default function useBluetooth({
   onData,
   onBluetoothPowerOffWhileConnected,
   onReconnectSuccess,
@@ -156,486 +117,662 @@ function useCapacitorBluetooth({
   onBluetoothEnabled,
   onBluetoothDisabled,
 } = {}) {
-  const [isConnected, setIsConnected]         = useState(false);
-  const [isScanning, setIsScanning]           = useState(false);
-  const [isConnecting, setIsConnecting]       = useState(false);
-  const [isReconnecting, setIsReconnecting]   = useState(false);
-  const [isFetchingData, setIsFetchingData]   = useState(false);
-  const [deviceInfo, setDeviceInfo]           = useState({ name: null, id: null });
-  const [error, setError]                     = useState(null);
-  const [deviceStatus, setDeviceStatus]       = useState(null);
+
+  const [isConnected, setIsConnected] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
+  const [isFetchingData, setIsFetchingData] = useState(false);
+  const [deviceInfo, setDeviceInfo] = useState({ name: null, id: null });
+  const [error, setError] = useState(null);
+  const [deviceStatus, setDeviceStatus] = useState(null);
   const [isBluetoothPoweredOn, setIsBluetoothPoweredOn] = useState(true);
-  const [discoveredDevices, setDiscoveredDevices]       = useState([]);
+  const [discoveredDevices, setDiscoveredDevices] = useState([]);
+  const [serialLog, setSerialLog] = useState([]); // { timestamp, raw, parsed }
 
-  const connectedDeviceIdRef = useRef(null);
-  const activeProfileRef     = useRef(null); // { service, rxChar, txChar }
-  const bleInitializedRef    = useRef(false);
-  const fetchResolveRef      = useRef(null);
-  const fetchRejectRef       = useRef(null);
+  const connectedAddressRef = useRef(null); // MAC address of connected device
+  const btInitializedRef = useRef(false);
+  const fetchResolveRef = useRef(null);
+  const fetchRejectRef = useRef(null);
+  const dataListenerRef = useRef(null);
 
-  // Always supported on native
+  // Web Serial and Mock refs
+  const selectedWebSerialPortRef = useRef(null);
+  const webSerialReaderRef = useRef(null);
+  const webSerialKeepReadingRef = useRef(true);
+  const simulatedDataIntervalRef = useRef(null);
+
+  // Always considered "supported" — on web, methods return stubs gracefully
   const isBluetoothSupported = true;
 
-  // ── Initialize BleClient once ──────────────────────────────────────────────
-  useEffect(() => {
-    const initBle = async () => {
-      try {
-        await BleClient.initialize({ androidNeverForLocation: true });
-        bleInitializedRef.current = true;
-        console.log('[CAP-BLE] BleClient initialized');
-
-        const enabled = await BleClient.isEnabled();
-        setIsBluetoothPoweredOn(enabled);
-        if (!enabled && onBluetoothDisabled) onBluetoothDisabled();
-      } catch (err) {
-        console.error('[CAP-BLE] Failed to initialize BleClient:', err);
-        setIsBluetoothPoweredOn(false);
-      }
+  // ── Append to serial monitor log ─────────────────────────────────────────
+  const appendSerialLog = useCallback((raw, parsed) => {
+    const entry = {
+      timestamp: new Date(),
+      raw,
+      parsed,
     };
-    initBle();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    setSerialLog(prev => {
+      const updated = [...prev, entry];
+      return updated.length > MAX_SERIAL_LOG ? updated.slice(-MAX_SERIAL_LOG) : updated;
+    });
+  }, []);
 
-  // ── Poll Bluetooth enabled status (Capacitor doesn't have a listener) ─────
-  useEffect(() => {
-    if (!bleInitializedRef.current) return;
+  // Keep onData callback fresh in the listener (via stable ref trick)
+  const onDataRef = useRef(onData);
+  useEffect(() => { onDataRef.current = onData; }, [onData]);
 
-    const checkEnabled = async () => {
-      try {
-        const enabled = await BleClient.isEnabled();
-        setIsBluetoothPoweredOn(prev => {
-          if (prev && !enabled) {
-            if (onBluetoothDisabled) onBluetoothDisabled();
-            // If connected when BT turns off
-            if (connectedDeviceIdRef.current && onBluetoothPowerOffWhileConnected) {
-              onBluetoothPowerOffWhileConnected();
-            }
-          } else if (!prev && enabled) {
-            if (onBluetoothEnabled) onBluetoothEnabled();
-          }
-          return enabled;
-        });
-      } catch { /* ignore */ }
-    };
+  // ── Read from Web Serial Port (Web Fallback) ─────────────────────────────
+  const readFromWebSerial = useCallback(async (port) => {
+    const decoder = new TextDecoder();
+    let buffer = '';
 
-    const interval = setInterval(checkEnabled, 3000);
-    return () => clearInterval(interval);
-  }, [onBluetoothDisabled, onBluetoothEnabled, onBluetoothPowerOffWhileConnected]);
-
-
-  // ── Notification handler ──────────────────────────────────────────────────
-  const handleNotification = useCallback((dataView) => {
     try {
-      const raw = dataViewToString(dataView);
-      console.log('[HC-05] Notification received — decoded string:', raw);
+      while (port.readable && webSerialKeepReadingRef.current) {
+        const reader = port.readable.getReader();
+        webSerialReaderRef.current = reader;
 
-      // Device status flags
-      if (raw === 'F' || raw === 'OK' || raw === 'READY') {
-        console.log('[HC-05] Device status flag received:', raw);
-        setDeviceStatus(raw);
-        return;
-      }
+        try {
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) {
+              console.log('[Web Serial] Reader closed (done)');
+              break;
+            }
+            if (value) {
+              const chunk = decoder.decode(value, { stream: true });
+              buffer += chunk;
 
-      // Pending fetchData promise
-      if (fetchResolveRef.current) {
-        console.log('[HC-05] Resolving pending fetchData promise with raw data');
-        const resolve = fetchResolveRef.current;
-        fetchResolveRef.current = null;
-        fetchRejectRef.current  = null;
-        resolve(raw);
-        return;
-      }
+              // Process completed lines
+              let newlineIdx;
+              while ((newlineIdx = buffer.indexOf('\n')) !== -1) {
+                const line = buffer.slice(0, newlineIdx).trim();
+                buffer = buffer.slice(newlineIdx + 1);
 
-      // Live streaming data
-      const parsed = parseHC05Data(raw);
-      if (parsed && onData && typeof onData === 'function') {
-        console.log('[HC-05] Streaming data — calling onData callback');
-        onData(parsed);
-      } else if (!parsed) {
-        console.warn('[HC-05] Could not parse streaming notification — data ignored');
+                if (line) {
+                  console.log('[Web Serial] Decoded line:', line);
+
+                  // Check status flags
+                  if (line === 'F' || line === 'OK' || line === 'READY') {
+                    setDeviceStatus(line);
+                    appendSerialLog(line, null);
+                  } else if (fetchResolveRef.current) {
+                    const resolve = fetchResolveRef.current;
+                    fetchResolveRef.current = null;
+                    fetchRejectRef.current = null;
+                    resolve(line);
+                    appendSerialLog(line, null);
+                  } else {
+                    const parsed = parseHC05Data(line);
+                    appendSerialLog(line, parsed);
+                    if (parsed && onDataRef.current) {
+                      onDataRef.current(parsed);
+                    }
+                  }
+                }
+              }
+            }
+          }
+        } catch (readErr) {
+          console.error('[Web Serial] Read error:', readErr);
+        } finally {
+          reader.releaseLock();
+          webSerialReaderRef.current = null;
+        }
       }
     } catch (err) {
-      console.error('[HC-05] handleNotification error:', err.message);
+      console.error('[Web Serial] Reader setup error:', err);
     }
-  }, [onData]);
+  }, [appendSerialLog]);
 
-
-  // ── Setup notifications on a connected device ─────────────────────────────
-  const setupCharacteristics = useCallback(async (deviceId) => {
-    let success = false;
-    let lastError = null;
-
-    for (const profile of UART_PROFILES) {
+  // ── Initialize Bluetooth Classic plugin once ──────────────────────────────
+  useEffect(() => {
+    const init = async () => {
       try {
-        console.log(`[CAP-BLE] Trying UART service: ${profile.service}`);
-
-        // Start notifications on the TX characteristic (device → phone)
-        await BleClient.startNotifications(
-          deviceId,
-          profile.service,
-          profile.txChar,
-          (value) => handleNotification(value)
-        );
-        console.log(`[CAP-BLE] Subscribed to notifications on ${profile.txChar}`);
-
-        activeProfileRef.current = profile;
-
-        // Send initial STATUS command
-        try {
-          await BleClient.write(deviceId, profile.service, profile.rxChar, textToDataView('STATUS'));
-          console.log('[HC-05] Sent initial STATUS command to device');
-        } catch (err) {
-          console.warn('[HC-05] Send STATUS command failed (non-fatal):', err.message);
-        }
-
-        console.log(`[CAP-BLE] Successfully connected to UART profile on service: ${profile.service}`);
-        success = true;
-        break;
+        await BluetoothCommunication.initialize();
+        btInitializedRef.current = true;
       } catch (err) {
-        lastError = err;
-        console.info(`[CAP-BLE] Profile ${profile.service} not active:`, err.message);
+        console.warn('[Classic-BT] Initialize warning (web stub?):', err.message);
+        // Still mark as initialized so web dev mode works
+        btInitializedRef.current = true;
       }
-    }
+    };
+    init();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    if (!success) {
-      console.warn('[CAP-BLE] UART characteristics subscription failed.', lastError?.message);
-    }
-  }, [handleNotification]);
 
+  // ── Attach data listener once (persists for the session) ─────────────────
+  useEffect(() => {
+    const setupListener = async () => {
+      try {
+        const handle = await BluetoothCommunication.addListener('dataReceived', (event) => {
+          const raw = typeof event === 'string' ? event : (event?.data ?? event?.message ?? JSON.stringify(event));
+          console.log('[Classic-BT] dataReceived event — raw:', raw);
+
+          // Device status flags
+          if (raw === 'F' || raw === 'OK' || raw === 'READY') {
+            console.log('[Classic-BT] Device status flag:', raw);
+            setDeviceStatus(raw);
+            appendSerialLog(raw, null);
+            return;
+          }
+
+          // Pending fetchData promise
+          if (fetchResolveRef.current) {
+            const resolve = fetchResolveRef.current;
+            fetchResolveRef.current = null;
+            fetchRejectRef.current = null;
+            resolve(raw);
+            appendSerialLog(raw, null); // log raw; caller parses
+            return;
+          }
+
+          // Live streaming data
+          const parsed = parseHC05Data(raw);
+          appendSerialLog(raw, parsed);
+
+          if (parsed && onDataRef.current) {
+            console.log('[Classic-BT] Streaming data — calling onData callback');
+            onDataRef.current(parsed);
+          } else if (!parsed) {
+            console.warn('[Classic-BT] Could not parse streaming data — logged raw only');
+          }
+        });
+        dataListenerRef.current = handle;
+        console.log('[Classic-BT] dataReceived listener attached');
+      } catch (err) {
+        console.warn('[Classic-BT] addListener warning (web stub?):', err.message);
+      }
+    };
+
+    setupListener();
+
+    return () => {
+      // Clean up listener on unmount
+      if (dataListenerRef.current) {
+        try {
+          dataListenerRef.current.remove();
+        } catch { /* ignore */ }
+        dataListenerRef.current = null;
+      }
+    };
+  }, [appendSerialLog]);
+
+  // Clean up serial interfaces and intervals on unmount
+  useEffect(() => {
+    return () => {
+      if (simulatedDataIntervalRef.current) {
+        clearInterval(simulatedDataIntervalRef.current);
+      }
+      webSerialKeepReadingRef.current = false;
+      if (webSerialReaderRef.current) {
+        try {
+          webSerialReaderRef.current.cancel();
+        } catch { /* ignore */ }
+      }
+    };
+  }, []);
 
   // ── Disconnect handler ────────────────────────────────────────────────────
   const handleDisconnect = useCallback(() => {
     setIsConnected(false);
     setDeviceStatus(null);
     setDeviceInfo({ name: null, id: null });
-    activeProfileRef.current = null;
-    connectedDeviceIdRef.current = null;
+    connectedAddressRef.current = null;
 
     if (fetchRejectRef.current) {
       fetchRejectRef.current(new Error('Device disconnected during fetch'));
       fetchResolveRef.current = null;
-      fetchRejectRef.current  = null;
+      fetchRejectRef.current = null;
     }
   }, []);
 
-
-  // ── Add discovered device ────────────────────────────────────────────────
-  const addDiscoveredDevice = useCallback((device, rssi = -70) => {
-    const id   = device.deviceId;
-    const name = device.localName || device.name || `BLE Device (${id.slice(0, 8)})`;
-
-    const entry = {
-      id,
-      name,
-      rssi,
-      lastSeen: Date.now(),
-      deviceObj: device,
-    };
-
-    setDiscoveredDevices(prev => {
-      const index = prev.findIndex(d => d.id === id);
-      if (index > -1) {
-        const next = [...prev];
-        next[index] = entry;
-        return next;
-      }
-      if (onDeviceFound) onDeviceFound(name);
-      return [...prev, entry];
+  const loadMockDevices = useCallback(() => {
+    const mocks = [
+      { id: 'mock-hc05', name: 'HC-05 (Simulated)', address: '98:D3:31:F4:12:3C', isMock: true },
+      { id: 'mock-hc06', name: 'HC-06 (Simulated)', address: '00:18:E4:35:0F:12', isMock: true },
+      { id: 'mock-esp32', name: 'ESP32-SPP (Simulated)', address: '24:0A:C4:8B:58:A2', isMock: true },
+    ];
+    setDiscoveredDevices(mocks);
+    mocks.forEach(m => {
+      if (onDeviceFound) onDeviceFound(m.name);
     });
   }, [onDeviceFound]);
 
 
-  // ── Scan ──────────────────────────────────────────────────────────────────
+  // ── Scan: load all paired Bluetooth Classic devices ──────────────────────
   const startScanning = useCallback(async () => {
-    if (!bleInitializedRef.current) return;
-
     setError(null);
     setIsScanning(true);
+    setDiscoveredDevices([]);
 
     try {
-      // Request permissions if needed (Android 12+)
-      await BleClient.requestLEScan(
-        {
-          // Scan for devices advertising our known services
-          // Using empty services array = scan all devices
-          services: [],
-          allowDuplicates: false,
-        },
-        (result) => {
-          if (result.device) {
-            const rssi = result.rssi !== undefined ? result.rssi : -75;
-            addDiscoveredDevice(result.device, rssi);
-          }
-        }
-      );
+      if (isNativePlatform) {
+        // On native Android: returns paired devices from BluetoothAdapter.getBondedDevices()
+        const result = await BluetoothCommunication.scanDevices();
+        const devices = result?.devices ?? [];
 
-      // Auto-stop after 15 seconds
-      setTimeout(async () => {
-        try {
-          await BleClient.stopLEScan();
-        } catch { /* ignore */ }
-        setIsScanning(false);
-      }, 15000);
+        console.log('[Classic-BT] Paired devices found:', devices.length);
+
+        const mapped = devices.map(d => ({
+          id: d.address,       // MAC address used as unique ID
+          name: d.name || `Device (${d.address})`,
+          address: d.address,
+          rssi: -70,             // Classic BT doesn't expose RSSI during pairing scan
+        }));
+
+        setDiscoveredDevices(mapped);
+
+        if (devices.length === 0) {
+          console.info('[Classic-BT] No paired devices found. Pair devices in Android Settings first.');
+        } else {
+          mapped.forEach(d => {
+            if (onDeviceFound) onDeviceFound(d.name);
+          });
+        }
+      } else {
+        // On web browser fallback: Check for Web Serial support
+        console.log('[Web] startScanning triggered.');
+        if ('serial' in navigator) {
+          try {
+            console.log('[Web] Requesting Web Serial port…');
+            const port = await navigator.serial.requestPort();
+            selectedWebSerialPortRef.current = port;
+
+            const dev = {
+              id: 'web-serial-port',
+              name: 'HC-05 (Web Serial)',
+              address: 'COM Port (Select to connect)',
+              isWebSerial: true
+            };
+            setDiscoveredDevices([dev]);
+            if (onDeviceFound) onDeviceFound(dev.name);
+          } catch (serialErr) {
+            console.warn('[Web] Web Serial request cancelled or failed:', serialErr.message);
+            // Fall back to Mock devices if cancelled/failed
+            loadMockDevices();
+          }
+        } else {
+          console.info('[Web] Web Serial not supported. Falling back to mock devices.');
+          loadMockDevices();
+        }
+      }
     } catch (err) {
-      console.error('[CAP-BLE] Scan failed:', err.message);
-      setError(err.message);
+      console.error('[Classic-BT] scanDevices failed:', err.message);
+      if (!err.message?.toLowerCase().includes('web') && !err.message?.toLowerCase().includes('stub')) {
+        setError(err.message);
+      }
+    } finally {
       setIsScanning(false);
     }
-  }, [addDiscoveredDevice]);
+  }, [onDeviceFound, loadMockDevices]);
 
 
-  const stopScanning = useCallback(async () => {
-    try {
-      await BleClient.stopLEScan();
-    } catch { /* ignore */ }
+  const stopScanning = useCallback(() => {
     setIsScanning(false);
   }, []);
-
 
   const clearDiscoveredDevices = useCallback(() => {
     setDiscoveredDevices([]);
   }, []);
 
 
-  // Stop scanning when BT turns off
-  useEffect(() => {
-    if (!isBluetoothPoweredOn) {
-      stopScanning();
-      clearDiscoveredDevices();
+  // ── Connect to a specific device by MAC address / Web Serial / Mock ───────
+  const connectDevice = useCallback(async (device) => {
+    const address = device.address ?? device.id;
+    const name = device.name || `Device (${address})`;
+
+    if (!address) {
+      setError('No device address provided');
+      return null;
     }
-  }, [isBluetoothPoweredOn, stopScanning, clearDiscoveredDevices]);
+
+    setIsConnecting(true);
+    setError(null);
+
+    try {
+      console.log(`[Classic-BT] Connecting to ${name} (${address})…`);
+
+      if (isNativePlatform) {
+        await BluetoothCommunication.connect({ address });
+        connectedAddressRef.current = address;
+        setIsConnected(true);
+        setDeviceInfo({ name, id: address });
+
+        // Send STATUS command
+        try {
+          await BluetoothCommunication.sendData({ data: 'STATUS\n' });
+          console.log('[Classic-BT] Sent STATUS command');
+        } catch { /* non-fatal */ }
+
+      } else if (device.isWebSerial) {
+        const port = selectedWebSerialPortRef.current;
+        if (!port) {
+          throw new Error('No serial port selected. Please scan again.');
+        }
+
+        console.log('[Web Serial] Opening port at 9600 baud…');
+        await port.open({ baudRate: 9600 });
+
+        connectedAddressRef.current = 'web-serial';
+        setIsConnected(true);
+        setDeviceInfo({ name: 'HC-05 (Web Serial)', id: 'web-serial' });
+
+        // Start reading loop
+        webSerialKeepReadingRef.current = true;
+        readFromWebSerial(port);
+
+        // Send STATUS handshake
+        try {
+          const writer = port.writable.getWriter();
+          await writer.write(new TextEncoder().encode('STATUS\n'));
+          writer.releaseLock();
+          console.log('[Web Serial] Sent STATUS command');
+        } catch (writeErr) {
+          console.warn('[Web Serial] Failed to send STATUS:', writeErr.message);
+        }
+
+      } else {
+        // Mock connection
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        connectedAddressRef.current = address;
+        setIsConnected(true);
+        setDeviceInfo({ name, id: address });
+
+        if (simulatedDataIntervalRef.current) {
+          clearInterval(simulatedDataIntervalRef.current);
+        }
+
+        simulatedDataIntervalRef.current = setInterval(() => {
+          const mockData = {
+            tiltAngle: parseFloat((5 + Math.random() * 20).toFixed(1)),
+            height: parseFloat((100 + Math.random() * 30).toFixed(1)),
+            voltageStatus: Math.random() > 0.3,
+            batterySOC: Math.max(0, Math.min(100, Math.round(80 - (Date.now() % 100000) / 10000))),
+            timestamp: new Date()
+          };
+          const rawLine = JSON.stringify({
+            tiltAngle: mockData.tiltAngle,
+            height: mockData.height,
+            voltageStatus: mockData.voltageStatus,
+            batterySOC: mockData.batterySOC
+          });
+          console.log('[Mock-BT] Simulated raw line:', rawLine);
+          appendSerialLog(rawLine, mockData);
+          if (onDataRef.current) onDataRef.current(mockData);
+        }, 2000);
+      }
+
+      setIsConnecting(false);
+      localStorage.setItem('lastConnectedDevice', JSON.stringify({
+        id: address,
+        name,
+        address,
+        isWebSerial: !!device.isWebSerial,
+        isMock: !device.isWebSerial && !isNativePlatform
+      }));
+
+      return { name, id: address };
+    } catch (err) {
+      setIsConnecting(false);
+      console.error('[Classic-BT] Connect failed:', err.message);
+      setError(err.message);
+      return null;
+    }
+  }, [appendSerialLog, readFromWebSerial]);
+
+
+  // ── connect() — directly scans and connects to a device, returning connection result ──
+  const connect = useCallback(async () => {
+    setError(null);
+    setIsConnecting(true);
+
+    try {
+      if (isNativePlatform) {
+        const result = await BluetoothCommunication.scanDevices();
+        const devices = result?.devices ?? [];
+        if (devices.length === 0) {
+          throw new Error('No paired Bluetooth Classic devices found. Please pair your HC-05/ESP32 in Android Settings first.');
+        }
+
+        // Try to reconnect to last used device if it is still paired, else pick the first paired device
+        const lastDeviceStr = localStorage.getItem('lastConnectedDevice');
+        let targetDevice = devices[0];
+        if (lastDeviceStr) {
+          try {
+            const lastDevice = JSON.parse(lastDeviceStr);
+            const match = devices.find(d => d.address === lastDevice.address);
+            if (match) targetDevice = match;
+          } catch { /* ignore */ }
+        }
+
+        const mappedDev = {
+          id: targetDevice.address,
+          name: targetDevice.name || `Device (${targetDevice.address})`,
+          address: targetDevice.address
+        };
+
+        return await connectDevice(mappedDev);
+      } else {
+        // Web browser: Try Web Serial
+        if ('serial' in navigator) {
+          try {
+            console.log('[Web Serial] Requesting port…');
+            const port = await navigator.serial.requestPort();
+            selectedWebSerialPortRef.current = port;
+
+            const dev = {
+              id: 'web-serial-port',
+              name: 'HC-05 (Web Serial)',
+              address: 'COM Port',
+              isWebSerial: true
+            };
+
+            return await connectDevice(dev);
+          } catch (serialErr) {
+            console.warn('[Web Serial] Request cancelled or failed, connecting to mock:', serialErr.message);
+            // Fall back to Mock HC-05 directly
+            const mockDev = { id: 'mock-hc05', name: 'HC-05 (Simulated)', address: '98:D3:31:F4:12:3C', isMock: true };
+            return await connectDevice(mockDev);
+          }
+        } else {
+          // No serial support: Connect to Mock directly
+          console.info('[Web] Web Serial not supported, connecting to mock.');
+          const mockDev = { id: 'mock-hc05', name: 'HC-05 (Simulated)', address: '98:D3:31:F4:12:3C', isMock: true };
+          return await connectDevice(mockDev);
+        }
+      }
+    } catch (err) {
+      setError(err.message);
+      return null;
+    } finally {
+      setIsConnecting(false);
+    }
+  }, [isNativePlatform, connectDevice]);
 
 
   // ── Disconnect ────────────────────────────────────────────────────────────
   const disconnect = useCallback(async () => {
-    const deviceId = connectedDeviceIdRef.current;
-    if (deviceId) {
+    if (simulatedDataIntervalRef.current) {
+      clearInterval(simulatedDataIntervalRef.current);
+      simulatedDataIntervalRef.current = null;
+    }
+
+    webSerialKeepReadingRef.current = false;
+    if (webSerialReaderRef.current) {
       try {
-        // Stop notifications first
-        if (activeProfileRef.current) {
-          try {
-            await BleClient.stopNotifications(deviceId, activeProfileRef.current.service, activeProfileRef.current.txChar);
-          } catch { /* ignore */ }
-        }
-        await BleClient.disconnect(deviceId);
+        await webSerialReaderRef.current.cancel();
+      } catch { /* ignore */ }
+      webSerialReaderRef.current = null;
+    }
+
+    if (selectedWebSerialPortRef.current) {
+      try {
+        await selectedWebSerialPortRef.current.close();
       } catch (err) {
-        console.warn('[CAP-BLE] Disconnect error:', err.message);
+        console.warn('[Web Serial] Port close error:', err.message);
+      }
+      selectedWebSerialPortRef.current = null;
+    }
+
+    if (isNativePlatform && connectedAddressRef.current) {
+      try {
+        await BluetoothCommunication.disconnect();
+        console.log('[Classic-BT] Disconnected');
+      } catch (err) {
+        console.warn('[Classic-BT] Disconnect error:', err.message);
       }
     }
+
     handleDisconnect();
   }, [handleDisconnect]);
 
 
-  // Disconnect when BT powers off while connected
-  useEffect(() => {
-    if (!isBluetoothPoweredOn && isConnected) {
-      disconnect();
-      setError('Bluetooth has been turned OFF');
-      if (onBluetoothPowerOffWhileConnected) {
-        onBluetoothPowerOffWhileConnected();
-      }
-    }
-  }, [isBluetoothPoweredOn, isConnected, disconnect, onBluetoothPowerOffWhileConnected]);
-
-
-  // ── Connect to a discovered device ────────────────────────────────────────
-  const connectDevice = useCallback(async (scannedDevice) => {
-    if (!bleInitializedRef.current || !isBluetoothPoweredOn) return null;
-    setIsConnecting(true);
-    setError(null);
-
-    const deviceId = scannedDevice.id;
-    const name     = scannedDevice.name || 'Unknown Device';
-
-    try {
-      await BleClient.connect(deviceId, () => {
-        console.log('[CAP-BLE] Device disconnected unexpectedly');
-        handleDisconnect();
-      });
-
-      connectedDeviceIdRef.current = deviceId;
-      await setupCharacteristics(deviceId);
-
-      setIsConnected(true);
-      setDeviceInfo({ name, id: deviceId });
-      setIsConnecting(false);
-
-      localStorage.setItem('lastConnectedDevice', JSON.stringify({ id: deviceId, name }));
-      return { name, id: deviceId };
-    } catch (err) {
-      setIsConnecting(false);
-      console.error('[CAP-BLE] Connect failed:', err.message);
-      setError(err.message);
-      return null;
-    }
-  }, [isBluetoothPoweredOn, handleDisconnect, setupCharacteristics]);
-
-
-  // ── Connect (scan + pick first / use requestDevice) ───────────────────────
-  const connect = useCallback(async () => {
-    if (!bleInitializedRef.current) return null;
-    setIsConnecting(true);
-    setError(null);
-
-    try {
-      // Use requestDevice which shows native picker on Android/iOS
-      const device = await BleClient.requestDevice({
-        services: [],
-        optionalServices: [HM10_SERVICE_UUID, NORDIC_NUS_SERVICE],
-      });
-
-      const name = device.localName || device.name || 'Unknown Device';
-      const deviceId = device.deviceId;
-
-      // Add to discovered list
-      addDiscoveredDevice(device, -65);
-
-      await BleClient.connect(deviceId, () => {
-        console.log('[CAP-BLE] Device disconnected unexpectedly');
-        handleDisconnect();
-      });
-
-      connectedDeviceIdRef.current = deviceId;
-      await setupCharacteristics(deviceId);
-
-      setIsConnected(true);
-      setDeviceInfo({ name, id: deviceId });
-      setIsConnecting(false);
-
-      localStorage.setItem('lastConnectedDevice', JSON.stringify({ id: deviceId, name }));
-      return { name, id: deviceId };
-    } catch (err) {
-      setIsConnecting(false);
-      if (err.message?.includes('cancelled') || err.message?.includes('canceled')) {
-        console.info('[CAP-BLE] User cancelled device picker');
-      } else {
-        console.error('[CAP-BLE] Connect failed:', err.message);
-        setError(err.message);
-      }
-      return null;
-    }
-  }, [addDiscoveredDevice, handleDisconnect, setupCharacteristics]);
-
-
   // ── Reconnect ─────────────────────────────────────────────────────────────
   const reconnect = useCallback(async () => {
-    if (!bleInitializedRef.current || !isBluetoothPoweredOn) return null;
-    setIsReconnecting(true);
-    setError(null);
-
     const lastDeviceStr = localStorage.getItem('lastConnectedDevice');
     if (!lastDeviceStr) {
       setError('No previously paired device found. Please scan to pair again.');
-      setIsReconnecting(false);
       return null;
     }
 
     const lastDevice = JSON.parse(lastDeviceStr);
 
+    setIsReconnecting(true);
+    setError(null);
+
     try {
-      await BleClient.connect(lastDevice.id, () => {
-        console.log('[CAP-BLE] Device disconnected during reconnect');
-        handleDisconnect();
-      });
-
-      connectedDeviceIdRef.current = lastDevice.id;
-      await setupCharacteristics(lastDevice.id);
-
-      const name = lastDevice.name || 'Unknown Device';
-      setIsConnected(true);
-      setDeviceInfo({ name, id: lastDevice.id });
+      const result = await connectDevice(lastDevice);
       setIsReconnecting(false);
 
-      if (onReconnectSuccess) onReconnectSuccess(name);
-      return { name, id: lastDevice.id };
+      if (result) {
+        if (onReconnectSuccess) onReconnectSuccess(result.name);
+        return result;
+      } else {
+        throw new Error('Reconnect failed');
+      }
     } catch (err) {
-      console.warn('[CAP-BLE] Reconnect failed:', err.message);
+      console.warn('[Classic-BT] Reconnect failed:', err.message);
       setError('Could not reconnect. The device may be out of range.');
       setIsReconnecting(false);
       return null;
     }
-  }, [isBluetoothPoweredOn, handleDisconnect, setupCharacteristics, onReconnectSuccess]);
+  }, [connectDevice, onReconnectSuccess]);
 
 
   // ── Auto-reconnect on startup ─────────────────────────────────────────────
   useEffect(() => {
-    if (isBluetoothPoweredOn && bleInitializedRef.current) {
+    const autoReconnect = async () => {
       const lastDeviceStr = localStorage.getItem('lastConnectedDevice');
-      if (lastDeviceStr) {
-        const lastDevice = JSON.parse(lastDeviceStr);
-        (async () => {
-          try {
-            setIsReconnecting(true);
-            await BleClient.connect(lastDevice.id, () => handleDisconnect());
-            connectedDeviceIdRef.current = lastDevice.id;
-            await setupCharacteristics(lastDevice.id);
+      if (!lastDeviceStr) return;
+      const lastDevice = JSON.parse(lastDeviceStr);
 
-            setIsConnected(true);
-            setDeviceInfo({ name: lastDevice.name, id: lastDevice.id });
-            if (onReconnectSuccess) onReconnectSuccess(lastDevice.name);
-          } catch (err) {
-            console.warn('[CAP-BLE] Auto-reconnect failed:', err.message);
-          } finally {
-            setIsReconnecting(false);
-          }
-        })();
+      try {
+        setIsReconnecting(true);
+        console.log('[Classic-BT] Auto-reconnect attempt to:', lastDevice.name);
+        await connectDevice(lastDevice);
+      } catch (err) {
+        console.warn('[Classic-BT] Auto-reconnect failed:', err.message);
+      } finally {
+        setIsReconnecting(false);
       }
-    }
-  }, [isBluetoothPoweredOn]); // eslint-disable-line react-hooks/exhaustive-deps
+    };
+
+    // Small delay to let plugin initialize
+    const timer = setTimeout(autoReconnect, 1500);
+    return () => clearTimeout(timer);
+  }, [connectDevice]);
 
 
-  // ── Fetch Data ────────────────────────────────────────────────────────────
+  // ── Fetch Data — sends GET_DATA command, waits for response ──────────────
   const fetchData = useCallback(async () => {
-    const deviceId = connectedDeviceIdRef.current;
-    const profile  = activeProfileRef.current;
-
-    if (!deviceId || !profile) {
-      console.error('[HC-05] fetchData called but no device is connected');
+    if (!connectedAddressRef.current) {
+      console.error('[Classic-BT] fetchData called but no device is connected');
       throw new Error('No device connected');
     }
 
-    console.log('[HC-05] Fetch Data initiated — sending GET_DATA command');
+    console.log('[Classic-BT] Fetch Data initiated — sending GET_DATA command');
     setIsFetchingData(true);
 
     return new Promise((resolve, reject) => {
       fetchResolveRef.current = resolve;
-      fetchRejectRef.current  = reject;
+      fetchRejectRef.current = reject;
 
-      const sendCommand = async () => {
+      const sendCommandLocal = async () => {
         try {
-          await BleClient.write(deviceId, profile.service, profile.rxChar, textToDataView('GET_DATA'));
-          console.log('[HC-05] ✓ GET_DATA command sent — waiting for response…');
+          const cmd = 'GET_DATA\n';
+          if (isNativePlatform) {
+            await BluetoothCommunication.sendData({ data: cmd });
+            console.log('[Classic-BT] ✓ GET_DATA command sent — waiting for response…');
+          } else if (connectedAddressRef.current === 'web-serial' && selectedWebSerialPortRef.current) {
+            const writer = selectedWebSerialPortRef.current.writable.getWriter();
+            await writer.write(new TextEncoder().encode(cmd));
+            writer.releaseLock();
+            console.log('[Web Serial] ✓ GET_DATA command sent — waiting for response…');
+          } else {
+            console.log('[Mock-BT] Simulated GET_DATA request…');
+            setTimeout(() => {
+              const mockVal = {
+                tiltAngle: parseFloat((5 + Math.random() * 20).toFixed(1)),
+                height: parseFloat((100 + Math.random() * 30).toFixed(1)),
+                voltageStatus: Math.random() > 0.3,
+                batterySOC: Math.max(0, Math.min(100, Math.round(80 - (Date.now() % 100000) / 10000))),
+                timestamp: new Date()
+              };
+              const rawLine = JSON.stringify({
+                tiltAngle: mockVal.tiltAngle,
+                height: mockVal.height,
+                voltageStatus: mockVal.voltageStatus,
+                batterySOC: mockVal.batterySOC
+              });
+              if (fetchResolveRef.current) {
+                const res = fetchResolveRef.current;
+                fetchResolveRef.current = null;
+                fetchRejectRef.current = null;
+                res(rawLine);
+                appendSerialLog(rawLine, null);
+              }
+            }, 800);
+          }
         } catch (primaryErr) {
-          console.warn('[HC-05] GET_DATA failed, retrying with FETCH:', primaryErr.message);
+          console.warn('[Classic-BT] GET_DATA failed, retrying with FETCH:', primaryErr.message);
           try {
-            await BleClient.write(deviceId, profile.service, profile.rxChar, textToDataView('FETCH'));
-            console.log('[HC-05] ✓ FETCH command sent (fallback) — waiting for response…');
+            const fallbackCmd = 'FETCH\n';
+            if (isNativePlatform) {
+              await BluetoothCommunication.sendData({ data: fallbackCmd });
+            } else if (connectedAddressRef.current === 'web-serial' && selectedWebSerialPortRef.current) {
+              const writer = selectedWebSerialPortRef.current.writable.getWriter();
+              await writer.write(new TextEncoder().encode(fallbackCmd));
+              writer.releaseLock();
+            }
           } catch (fallbackErr) {
-            console.warn('[HC-05] Both commands failed:', fallbackErr.message);
+            console.warn('[Classic-BT] Both commands failed:', fallbackErr.message);
           }
         }
       };
-      sendCommand();
+      sendCommandLocal();
 
       const TIMEOUT_MS = 5000;
-      const timer = setTimeout(() => {
+      const timerLocal = setTimeout(() => {
         if (fetchResolveRef.current) {
           fetchResolveRef.current = null;
-          fetchRejectRef.current  = null;
-          console.error(`[HC-05] ✗ No response within ${TIMEOUT_MS / 1000}s — timeout`);
-          reject(new Error(`No data received from HC-05 within ${TIMEOUT_MS / 1000} seconds`));
+          fetchRejectRef.current = null;
+          console.error(`[Classic-BT] ✗ No response within ${TIMEOUT_MS / 1000}s — timeout`);
+          reject(new Error(`No data received within ${TIMEOUT_MS / 1000} seconds`));
         }
       }, TIMEOUT_MS);
 
       const origResolve = resolve;
       fetchResolveRef.current = (val) => {
-        clearTimeout(timer);
-        console.log('[HC-05] ✓ Response received from HC-05');
+        clearTimeout(timerLocal);
+        console.log('[Classic-BT] ✓ Response received');
         origResolve(val);
       };
     }).finally(() => {
       setIsFetchingData(false);
     });
-  }, []);
+  }, [appendSerialLog]);
 
 
   const parseFetchedData = useCallback((raw) => {
@@ -645,30 +782,79 @@ function useCapacitorBluetooth({
 
   // ── Send Command ──────────────────────────────────────────────────────────
   const sendCommand = useCallback(async (command) => {
-    const deviceId = connectedDeviceIdRef.current;
-    const profile  = activeProfileRef.current;
-    if (!deviceId || !profile) return;
+    const formatted = command.endsWith('\n') ? command : command + '\n';
 
-    try {
-      await BleClient.write(deviceId, profile.service, profile.rxChar, textToDataView(command));
-    } catch (err) {
-      console.warn('[CAP-BLE] Send command failed:', err.message);
+    if (isNativePlatform) {
+      if (!connectedAddressRef.current) return;
+      try {
+        await BluetoothCommunication.sendData({ data: formatted });
+        console.log('[Classic-BT] Sent command:', command);
+      } catch (err) {
+        console.warn('[Classic-BT] Send command failed:', err.message);
+      }
+    } else if (connectedAddressRef.current === 'web-serial' && selectedWebSerialPortRef.current) {
+      try {
+        const writer = selectedWebSerialPortRef.current.writable.getWriter();
+        await writer.write(new TextEncoder().encode(formatted));
+        writer.releaseLock();
+        console.log('[Web Serial] Sent command:', command);
+        appendSerialLog(`Sent: ${command}`, null);
+      } catch (err) {
+        console.warn('[Web Serial] Send command failed:', err.message);
+      }
+    } else if (connectedAddressRef.current) {
+      console.log('[Mock-BT] Received command:', command);
+      appendSerialLog(`Sent: ${command}`, null);
+
+      if (command.trim() === 'GET_DATA' || command.trim() === 'FETCH') {
+        setTimeout(() => {
+          const mockVal = {
+            tiltAngle: parseFloat((5 + Math.random() * 20).toFixed(1)),
+            height: parseFloat((100 + Math.random() * 30).toFixed(1)),
+            voltageStatus: Math.random() > 0.3,
+            batterySOC: Math.max(0, Math.min(100, Math.round(80 - (Date.now() % 100000) / 10000))),
+            timestamp: new Date()
+          };
+          const rawLine = JSON.stringify({
+            tiltAngle: mockVal.tiltAngle,
+            height: mockVal.height,
+            voltageStatus: mockVal.voltageStatus,
+            batterySOC: mockVal.batterySOC
+          });
+
+          if (fetchResolveRef.current) {
+            const resolve = fetchResolveRef.current;
+            fetchResolveRef.current = null;
+            fetchRejectRef.current = null;
+            resolve(rawLine);
+            appendSerialLog(rawLine, null);
+          }
+        }, 500);
+      }
     }
+  }, [appendSerialLog]);
+
+
+  // ── Clear serial log ──────────────────────────────────────────────────────
+  const clearSerialLog = useCallback(() => {
+    setSerialLog([]);
   }, []);
 
 
+  // ── Connection status string ──────────────────────────────────────────────
   const connectionStatus = useMemo(() => {
     if (!isBluetoothPoweredOn) return 'off';
-    if (isConnecting)          return 'connecting';
-    if (isReconnecting)        return 'reconnecting';
-    if (isFetchingData)        return 'fetching';
-    if (isConnected)           return 'connected';
-    if (isScanning)            return 'scanning';
+    if (isConnecting) return 'connecting';
+    if (isReconnecting) return 'reconnecting';
+    if (isFetchingData) return 'fetching';
+    if (isConnected) return 'connected';
+    if (isScanning) return 'scanning';
     return 'disconnected';
   }, [isBluetoothPoweredOn, isConnecting, isReconnecting, isFetchingData, isConnected, isScanning]);
 
 
   return {
+    // Actions
     connect,
     connectDevice,
     disconnect,
@@ -679,6 +865,9 @@ function useCapacitorBluetooth({
     startScanning,
     stopScanning,
     clearDiscoveredDevices,
+    clearSerialLog,
+
+    // State
     isConnected,
     isScanning,
     isConnecting,
@@ -691,614 +880,8 @@ function useCapacitorBluetooth({
     isBluetoothPoweredOn,
     connectionStatus,
     isBluetoothSupported,
+
+    // Serial monitor
+    serialLog,
   };
-}
-
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// WEB BLUETOOTH FALLBACK (for desktop browser development)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-function useWebBluetooth({
-  onData,
-  onBluetoothPowerOffWhileConnected,
-  onReconnectSuccess,
-  onDeviceFound,
-  onBluetoothEnabled,
-  onBluetoothDisabled,
-} = {}) {
-  const [isConnected, setIsConnected]         = useState(false);
-  const [isScanning, setIsScanning]           = useState(false);
-  const [isConnecting, setIsConnecting]       = useState(false);
-  const [isReconnecting, setIsReconnecting]   = useState(false);
-  const [isFetchingData, setIsFetchingData]   = useState(false);
-  const [deviceInfo, setDeviceInfo]           = useState({ name: null, id: null });
-  const [error, setError]                     = useState(null);
-  const [deviceStatus, setDeviceStatus]       = useState(null);
-  const [isBluetoothPoweredOn, setIsBluetoothPoweredOn] = useState(true);
-  const [discoveredDevices, setDiscoveredDevices]       = useState([]);
-
-  const deviceRef         = useRef(null);
-  const serverRef         = useRef(null);
-  const characteristicRef = useRef(null);
-  const isPoweredOnRef    = useRef(true);
-  const knownDevicesRef   = useRef(new Map());
-  const fetchResolveRef   = useRef(null);
-  const fetchRejectRef    = useRef(null);
-
-  const isBluetoothSupported = typeof navigator !== 'undefined' && !!navigator.bluetooth;
-
-
-  const handleNotification = useCallback(
-    (event) => {
-      try {
-        const value = event.target.value;
-        const decoder = new TextDecoder('utf-8');
-        const raw = decoder.decode(value).trim();
-
-        console.log('[HC-05] Notification received — raw bytes:', value.byteLength, 'bytes');
-        console.log('[HC-05] Decoded string:', raw);
-
-        // ── Device status flag (sent by HC-05 to signal ready state) ──────────
-        if (raw === 'F' || raw === 'OK' || raw === 'READY') {
-          console.log('[HC-05] Device status flag received:', raw);
-          setDeviceStatus(raw);
-          return;
-        }
-
-        // ── If there is a pending fetchData promise, resolve it first ──────────
-        if (fetchResolveRef.current) {
-          console.log('[HC-05] Resolving pending fetchData promise with raw data');
-          const resolve = fetchResolveRef.current;
-          fetchResolveRef.current = null;
-          fetchRejectRef.current  = null;
-          resolve(raw);
-          return;
-        }
-
-        // ── Live streaming data (continuous notifications) ─────────────────────
-        const parsed = parseHC05Data(raw);
-        if (parsed && onData && typeof onData === 'function') {
-          console.log('[HC-05] Streaming data — calling onData callback');
-          onData(parsed);
-        } else if (!parsed) {
-          console.warn('[HC-05] Could not parse streaming notification — data ignored');
-        }
-      } catch (err) {
-        console.error('[HC-05] handleNotification error:', err.message);
-      }
-    },
-    [onData]
-  );
-
-  const setupCharacteristics = useCallback(async (server) => {
-    let success = false;
-    let lastError = null;
-
-    for (const profile of WEB_UART_PROFILES) {
-      try {
-        console.log(`[BT] Attempting connection to UART service: ${profile.service}`);
-        const service = await server.getPrimaryService(profile.service);
-        const characteristic = await service.getCharacteristic(profile.characteristic);
-
-        if (characteristic.properties.notify) {
-          await characteristic.startNotifications();
-          characteristic.addEventListener('characteristicvaluechanged', handleNotification);
-          console.log(`[BT] Subscribed to notifications on characteristic: ${profile.characteristic}`);
-        } else {
-          console.warn('[BT] Characteristic does not support notify — no live streaming available');
-        }
-        characteristicRef.current = characteristic;
-
-        // Send initial STATUS command so HC-05 knows we are ready
-        try {
-          const encoder = new TextEncoder();
-          await characteristic.writeValue(encoder.encode('STATUS'));
-          console.log('[HC-05] Sent initial STATUS command to device');
-        } catch (err) {
-          console.warn('[HC-05] Send STATUS command failed (non-fatal):', err.message);
-        }
-
-        console.log(`[BT] Successfully connected to UART profile on service: ${profile.service}`);
-        success = true;
-        break;
-      } catch (err) {
-        lastError = err;
-        console.info(`[BT] Profile ${profile.service} not active:`, err.message);
-      }
-    }
-
-    if (!success) {
-      console.warn('[BT] UART characteristics subscription failed. Operating without notifications.', lastError?.message);
-    }
-  }, [handleNotification]);
-
-  const handleGattDisconnected = useCallback(() => {
-    setIsConnected(false);
-    setDeviceStatus(null);
-    setDeviceInfo({ name: null, id: null });
-    characteristicRef.current = null;
-    serverRef.current = null;
-    // Reject any pending fetchData on unexpected disconnect
-    if (fetchRejectRef.current) {
-      fetchRejectRef.current(new Error('Device disconnected during fetch'));
-      fetchResolveRef.current = null;
-      fetchRejectRef.current  = null;
-    }
-  }, []);
-
-
-  useEffect(() => {
-    if (!isBluetoothSupported) {
-      setIsBluetoothPoweredOn(false);
-      isPoweredOnRef.current = false;
-      return;
-    }
-
-    if (navigator.bluetooth.getAvailability) {
-      navigator.bluetooth.getAvailability().then((available) => {
-        setIsBluetoothPoweredOn(available);
-        isPoweredOnRef.current = available;
-      }).catch(() => {});
-    }
-
-    const handleAvailabilityChanged = (event) => {
-      const available = event.value;
-      setIsBluetoothPoweredOn(available);
-
-      if (available && !isPoweredOnRef.current) {
-        if (onBluetoothEnabled) onBluetoothEnabled();
-      } else if (!available && isPoweredOnRef.current) {
-        if (onBluetoothDisabled) onBluetoothDisabled();
-      }
-      isPoweredOnRef.current = available;
-    };
-
-    navigator.bluetooth.addEventListener('availabilitychanged', handleAvailabilityChanged);
-    return () => {
-      navigator.bluetooth.removeEventListener('availabilitychanged', handleAvailabilityChanged);
-    };
-  }, [isBluetoothSupported, onBluetoothEnabled, onBluetoothDisabled]);
-
-
-  const disconnect = useCallback(async () => {
-    if (characteristicRef.current) {
-      try {
-        characteristicRef.current.removeEventListener(
-          'characteristicvaluechanged',
-          handleNotification
-        );
-        if (characteristicRef.current.properties?.notify) {
-          await characteristicRef.current.stopNotifications();
-        }
-      } catch {  }
-      characteristicRef.current = null;
-    }
-
-    if (deviceRef.current?.gatt?.connected) {
-      deviceRef.current.gatt.disconnect();
-    }
-
-    handleGattDisconnected();
-  }, [handleNotification, handleGattDisconnected]);
-
-
-  useEffect(() => {
-    if (!isBluetoothPoweredOn && isConnected) {
-      disconnect();
-      setError('Bluetooth has been turned OFF');
-      if (onBluetoothPowerOffWhileConnected) {
-        onBluetoothPowerOffWhileConnected();
-      }
-    }
-  }, [isBluetoothPoweredOn, isConnected, disconnect, onBluetoothPowerOffWhileConnected]);
-
-
-  const addDiscoveredDevice = useCallback((device, rssi = -70) => {
-    const id   = device.id;
-    const name = device.name || `BLE Device (${id.slice(0, 8)})`;
-
-    const entry = {
-      id,
-      name,
-      rssi,
-      lastSeen: Date.now(),
-      deviceObj: device,
-    };
-
-    knownDevicesRef.current.set(id, entry);
-
-    setDiscoveredDevices(prev => {
-      const index = prev.findIndex(d => d.id === id);
-      if (index > -1) {
-        const next = [...prev];
-        next[index] = entry;
-        return next;
-      }
-
-      if (onDeviceFound) onDeviceFound(name);
-      return [...prev, entry];
-    });
-  }, [onDeviceFound]);
-
-
-  const startScanning = useCallback(async () => {
-    if (!isBluetoothSupported) return;
-
-    setError(null);
-    setIsScanning(true);
-
-    try {
-      if (navigator.bluetooth.requestLEScan) {
-        try {
-          const scan = await navigator.bluetooth.requestLEScan({
-            acceptAllAdvertisements: true,
-            keepRepeatedDevices: false,
-          });
-
-          const onAdvert = (event) => {
-            const dev  = event.device;
-            const rssi = event.rssi !== undefined ? event.rssi : -75;
-            addDiscoveredDevice(dev, rssi);
-          };
-          navigator.bluetooth.addEventListener('advertisementreceived', onAdvert);
-
-          setTimeout(() => {
-            try { scan.stop(); } catch {}
-            navigator.bluetooth.removeEventListener('advertisementreceived', onAdvert);
-            setIsScanning(false);
-          }, 15000);
-
-          return;
-        } catch (leScanErr) {
-          console.info('[BT] requestLEScan not available, falling back to requestDevice picker:', leScanErr.message);
-        }
-      }
-
-      const device = await navigator.bluetooth.requestDevice({
-        acceptAllDevices: true,
-        optionalServices: OPTIONAL_SERVICES,
-      });
-
-      const simulatedRssi = -(Math.floor(Math.random() * 40) + 50);
-      addDiscoveredDevice(device, simulatedRssi);
-
-    } catch (err) {
-      if (err.name === 'NotFoundError' || err.name === 'AbortError') {
-        console.info('[BT] User closed device picker without selecting a device.');
-      } else {
-        console.warn('[BT] Scan failed:', err.message);
-        setError(err.message);
-      }
-    } finally {
-      setIsScanning(false);
-    }
-  }, [isBluetoothSupported, isBluetoothPoweredOn, addDiscoveredDevice]);
-
-
-  const stopScanning = useCallback(() => {
-    setIsScanning(false);
-  }, []);
-
-
-  const clearDiscoveredDevices = useCallback(() => {
-    knownDevicesRef.current.clear();
-    setDiscoveredDevices([]);
-  }, []);
-
-
-  useEffect(() => {
-    if (!isBluetoothPoweredOn) {
-      stopScanning();
-      clearDiscoveredDevices();
-    }
-  }, [isBluetoothPoweredOn, stopScanning, clearDiscoveredDevices]);
-
-
-  const attemptAutoReconnect = useCallback(async () => {
-    if (!isBluetoothSupported || !isBluetoothPoweredOn || !navigator.bluetooth.getDevices) return;
-    const lastDeviceStr = localStorage.getItem('lastConnectedDevice');
-    if (!lastDeviceStr) return;
-    const lastDevice = JSON.parse(lastDeviceStr);
-
-    try {
-      setIsReconnecting(true);
-      setError(null);
-      const devices = await navigator.bluetooth.getDevices();
-      const match = devices.find(d => d.id === lastDevice.id);
-
-      if (match) {
-        console.log('[BT] Found permitted device for auto-reconnection:', match.name);
-        deviceRef.current = match;
-
-        match.addEventListener('gattserverdisconnected', handleGattDisconnected);
-
-        const server = await match.gatt.connect();
-        serverRef.current = server;
-
-        await setupCharacteristics(server);
-
-        setIsConnected(true);
-        setDeviceInfo({ name: match.name || 'Unknown Device', id: match.id });
-        if (onReconnectSuccess) onReconnectSuccess(match.name || 'Unknown Device');
-      }
-    } catch (err) {
-      console.warn('[BT] Auto-reconnect failed:', err.message);
-    } finally {
-      setIsReconnecting(false);
-    }
-  }, [isBluetoothSupported, isBluetoothPoweredOn, handleGattDisconnected, setupCharacteristics, onReconnectSuccess]);
-
-
-  const reconnect = useCallback(async () => {
-    if (!isBluetoothSupported || !isBluetoothPoweredOn) return null;
-    setIsReconnecting(true);
-    setError(null);
-
-    try {
-      if (deviceRef.current) {
-        try {
-          deviceRef.current.addEventListener('gattserverdisconnected', handleGattDisconnected);
-          const server = await deviceRef.current.gatt.connect();
-          serverRef.current = server;
-          await setupCharacteristics(server);
-
-          const name = deviceRef.current.name || 'Unknown Device';
-          const id   = deviceRef.current.id;
-          setIsConnected(true);
-          setDeviceInfo({ name, id });
-          localStorage.setItem('lastConnectedDevice', JSON.stringify({ id, name }));
-          if (onReconnectSuccess) onReconnectSuccess(name);
-          setIsReconnecting(false);
-          return { name, id };
-        } catch (err) {
-          console.warn('[BT] Direct reconnect failed, trying permitted devices:', err.message);
-        }
-      }
-
-      if (navigator.bluetooth.getDevices) {
-        const lastDeviceStr = localStorage.getItem('lastConnectedDevice');
-        if (lastDeviceStr) {
-          const lastDevice = JSON.parse(lastDeviceStr);
-          const devices = await navigator.bluetooth.getDevices();
-          const match = devices.find(d => d.id === lastDevice.id);
-
-          if (match) {
-            deviceRef.current = match;
-            match.addEventListener('gattserverdisconnected', handleGattDisconnected);
-            const server = await match.gatt.connect();
-            serverRef.current = server;
-            await setupCharacteristics(server);
-
-            const name = match.name || lastDevice.name || 'Unknown Device';
-            const id   = match.id;
-            setIsConnected(true);
-            setDeviceInfo({ name, id });
-            localStorage.setItem('lastConnectedDevice', JSON.stringify({ id, name }));
-            if (onReconnectSuccess) onReconnectSuccess(name);
-            setIsReconnecting(false);
-            return { name, id };
-          }
-        }
-      }
-
-      setError('No previously paired device found. Please scan to pair again.');
-      setIsReconnecting(false);
-      return null;
-    } catch (err) {
-      console.warn('[BT] Reconnect failed:', err.message);
-      setError(err.message);
-      setIsReconnecting(false);
-      return null;
-    }
-  }, [isBluetoothSupported, isBluetoothPoweredOn, handleGattDisconnected, setupCharacteristics, onReconnectSuccess]);
-
-
-  const connectDevice = useCallback(async (scannedDevice) => {
-    if (!isBluetoothSupported || !isBluetoothPoweredOn) return null;
-    setIsConnecting(true);
-    setError(null);
-
-    const name = scannedDevice.name || 'Unknown Device';
-    const id   = scannedDevice.id;
-
-    try {
-      let device = scannedDevice.deviceObj;
-
-      try {
-        device.addEventListener('gattserverdisconnected', handleGattDisconnected);
-        const server = await device.gatt.connect();
-        serverRef.current = server;
-        deviceRef.current = device;
-        await setupCharacteristics(server);
-      } catch (err) {
-        console.log('[BT] Direct connect failed, prompting picker for permission fallback:', err.message);
-        device = await navigator.bluetooth.requestDevice({
-          filters: [{ name: scannedDevice.name }],
-          optionalServices: OPTIONAL_SERVICES,
-        });
-        device.addEventListener('gattserverdisconnected', handleGattDisconnected);
-        const server = await device.gatt.connect();
-        serverRef.current = server;
-        deviceRef.current = device;
-        await setupCharacteristics(server);
-      }
-
-      setIsConnected(true);
-      setDeviceInfo({ name, id });
-      setIsConnecting(false);
-
-      localStorage.setItem('lastConnectedDevice', JSON.stringify({ id, name }));
-
-      return { name, id };
-    } catch (err) {
-      setIsConnecting(false);
-      if (err.name !== 'NotFoundError') {
-        setError(err.message);
-      }
-      return null;
-    }
-  }, [isBluetoothSupported, isBluetoothPoweredOn, handleGattDisconnected, setupCharacteristics]);
-
-
-  const connect = useCallback(async () => {
-    if (!isBluetoothSupported) return null;
-    setIsConnecting(true);
-    setError(null);
-
-    try {
-      const device = await navigator.bluetooth.requestDevice({
-        acceptAllDevices: true,
-        optionalServices: OPTIONAL_SERVICES,
-      });
-
-      const name = device.name || 'Unknown Device';
-      const id   = device.id || 'N/A';
-
-      addDiscoveredDevice(device, -65);
-
-      device.addEventListener('gattserverdisconnected', handleGattDisconnected);
-      const server = await device.gatt.connect();
-      serverRef.current = server;
-      deviceRef.current = device;
-
-      await setupCharacteristics(server);
-
-      setIsConnected(true);
-      setDeviceInfo({ name, id });
-      setIsConnecting(false);
-
-      localStorage.setItem('lastConnectedDevice', JSON.stringify({ id, name }));
-      return { name, id };
-    } catch (err) {
-      setIsConnecting(false);
-      if (err.name !== 'NotFoundError') {
-        setError(err.message);
-      }
-      return null;
-    }
-  }, [isBluetoothSupported, isBluetoothPoweredOn, handleGattDisconnected, setupCharacteristics, addDiscoveredDevice]);
-
-
-  useEffect(() => {
-    if (isBluetoothPoweredOn) {
-      attemptAutoReconnect().catch(() => {});
-    }
-  }, [isBluetoothPoweredOn, attemptAutoReconnect]);
-
-
-  const fetchData = useCallback(async () => {
-    if (!characteristicRef.current) {
-      console.error('[HC-05] fetchData called but no device is connected');
-      throw new Error('No device connected');
-    }
-
-    console.log('[HC-05] Fetch Data initiated — sending GET_DATA command to HC-05');
-    setIsFetchingData(true);
-
-    return new Promise((resolve, reject) => {
-      fetchResolveRef.current = resolve;
-      fetchRejectRef.current  = reject;
-
-      const sendCommand = async () => {
-        const encoder = new TextEncoder();
-        try {
-          await characteristicRef.current.writeValue(encoder.encode('GET_DATA'));
-          console.log('[HC-05] ✓ GET_DATA command sent to HC-05 — waiting for response…');
-        } catch (primaryErr) {
-          console.warn('[HC-05] GET_DATA failed, retrying with FETCH command:', primaryErr.message);
-          try {
-            await characteristicRef.current.writeValue(encoder.encode('FETCH'));
-            console.log('[HC-05] ✓ FETCH command sent to HC-05 (fallback) — waiting for response…');
-          } catch (fallbackErr) {
-            console.warn('[HC-05] Both commands failed to send:', fallbackErr.message);
-          }
-        }
-      };
-      sendCommand();
-
-      const TIMEOUT_MS = 5000;
-      const timer = setTimeout(() => {
-        if (fetchResolveRef.current) {
-          fetchResolveRef.current = null;
-          fetchRejectRef.current  = null;
-          console.error(`[HC-05] ✗ No response from device within ${TIMEOUT_MS / 1000}s — timeout`);
-          reject(new Error(`No data received from HC-05 within ${TIMEOUT_MS / 1000} seconds`));
-        }
-      }, TIMEOUT_MS);
-
-      const origResolve = resolve;
-      fetchResolveRef.current = (val) => {
-        clearTimeout(timer);
-        console.log('[HC-05] ✓ Response received from HC-05');
-        origResolve(val);
-      };
-    }).finally(() => {
-      setIsFetchingData(false);
-    });
-  }, []);
-
-
-  const parseFetchedData = useCallback((raw) => {
-    return parseHC05Data(raw);
-  }, []);
-
-
-  const connectionStatus = useMemo(() => {
-    if (!isBluetoothSupported) return 'unsupported';
-    if (!isBluetoothPoweredOn) return 'off';
-    if (isConnecting)          return 'connecting';
-    if (isReconnecting)        return 'reconnecting';
-    if (isFetchingData)        return 'fetching';
-    if (isConnected)           return 'connected';
-    if (isScanning)            return 'scanning';
-    return 'disconnected';
-  }, [isBluetoothSupported, isBluetoothPoweredOn, isConnecting, isReconnecting, isFetchingData, isConnected, isScanning]);
-
-  const sendCommand = useCallback(async (command) => {
-    if (!characteristicRef.current) return;
-    try {
-      const encoder = new TextEncoder();
-      await characteristicRef.current.writeValue(encoder.encode(command));
-    } catch (err) {
-      console.warn('[BT] Send command failed:', err.message);
-    }
-  }, []);
-
-  return {
-    connect,
-    connectDevice,
-    disconnect,
-    reconnect,
-    sendCommand,
-    fetchData,
-    parseFetchedData,
-    startScanning,
-    stopScanning,
-    clearDiscoveredDevices,
-    isConnected,
-    isScanning,
-    isConnecting,
-    isReconnecting,
-    isFetchingData,
-    deviceInfo,
-    error,
-    deviceStatus,
-    discoveredDevices,
-    isBluetoothPoweredOn,
-    connectionStatus,
-    isBluetoothSupported,
-  };
-}
-
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// MAIN EXPORT — auto-selects native or web implementation
-// ═══════════════════════════════════════════════════════════════════════════════
-
-export default function useBluetooth(options = {}) {
-  if (isNativePlatform) {
-    return useCapacitorBluetooth(options);   // eslint-disable-line react-hooks/rules-of-hooks
-  }
-  return useWebBluetooth(options);          // eslint-disable-line react-hooks/rules-of-hooks
 }
