@@ -394,7 +394,7 @@ export default function App() {
           <ConnectionScreen
             onConnect={handleConnect}
             onConnectDevice={handleConnectDevice}
-            onScan={handleConnect}
+            onScan={startScanning}
             onClearDevices={clearDiscoveredDevices}
             discoveredDevices={discoveredDevices}
             connectionStatus={connectionStatus}

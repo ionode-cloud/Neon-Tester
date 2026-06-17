@@ -364,7 +364,7 @@ export default function useBluetooth({
         setDiscoveredDevices(mapped);
 
         if (devices.length === 0) {
-          console.info('[Classic-BT] No paired devices found. Pair devices in Android Settings first.');
+          setError('No paired Bluetooth Classic devices found. Please pair your HC-05/ESP32 in Android Settings first.');
         } else {
           mapped.forEach(d => {
             if (onDeviceFound) onDeviceFound(d.name);
