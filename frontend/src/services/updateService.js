@@ -15,8 +15,8 @@ import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 
 // ─── Current app version — keep this in sync with android/app/build.gradle ──
 // versionCode must be a plain integer (matches build.gradle versionCode field)
-export const APP_VERSION_NAME = '1.0';
-export const APP_VERSION_CODE = 1;   // ← increment this with every new build
+export const APP_VERSION_NAME = '1.0.1';
+export const APP_VERSION_CODE = 2;   // ← increment this with every new build
 
 const UPDATE_CHECK_URL = `${import.meta.env.VITE_API_BASE_URL || ''}/api/update/check`;
 
