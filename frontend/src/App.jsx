@@ -305,11 +305,12 @@ export default function App() {
       }
     } else {
       // reconnect() already set the error state; caller can open scan panel
-      showToast('Could not reconnect. Try scanning for devices.', 'warning');
+      showToast('Could not reconnect. Opening scan view...', 'warning');
+      await handleScan();
     }
     // Returns null if device unavailable — Dashboard will open scan panel
     return result;
-  }, [reconnect, showToast, emitDeviceConnected, handleFetchData]);
+  }, [reconnect, showToast, emitDeviceConnected, handleFetchData, handleScan]);
 
 
   // ── Exit — disconnect + return to Home ───────────────────────────────────

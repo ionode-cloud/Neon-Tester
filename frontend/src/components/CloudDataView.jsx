@@ -2,6 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { RiDatabase2Line } from 'react-icons/ri';
 import { deviceApi } from '../services/api';
 import BatteryBar from './BatteryBar';
+import { Capacitor } from '@capacitor/core';
+import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
+import { FileOpener } from '@capacitor-community/file-opener';
 
 const isVoltageActive = (status) => {
   if (!status) return false;
@@ -74,31 +77,53 @@ export default function CloudDataView({ lastCreated, lastUpdated, lastDeleted, l
     }
   };
 
-  const handleExportCSV = () => {
+  const handleExportCSV = async () => {
     if (!data.length) return;
     const headers = ['Timestamp', 'Device ID', 'Tilt Angle (°)', 'Height (m)', 'Voltage Status', 'Battery SOC (%)', 'Latitude', 'Longitude'];
     const csvRows = [
       headers.join(','),
       ...data.map((row) => [
         new Date(row.timestamp).toISOString(),
-        row.deviceId,
+        row.deviceId || '',
         row.tiltAngle,
         row.height,
-        row.voltageStatus ? 'ACTIVE' : 'INACTIVE',
+        row.voltageStatus || '',
         row.batterySOC,
         row.latitude !== undefined && row.latitude !== null ? row.latitude : '',
         row.longitude !== undefined && row.longitude !== null ? row.longitude : '',
       ].map(val => `"${val}"`).join(','))
     ];
 
-    const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `cloud_telemetry_history_${Date.now()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const csvContent = csvRows.join('\n');
+
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const fileName = `cloud_telemetry_history_${Date.now()}.csv`;
+        const result = await Filesystem.writeFile({
+          path: fileName,
+          data: csvContent,
+          directory: Directory.Cache,
+          encoding: Encoding.UTF8
+        });
+
+        await FileOpener.open({
+          filePath: result.uri,
+          contentType: 'text/csv'
+        });
+      } catch (err) {
+        console.error('[CloudDataView] Capacitor CSV Export failed:', err);
+        alert('Failed to export CSV: ' + err.message);
+      }
+    } else {
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `cloud_telemetry_history_${Date.now()}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
   };
 
   const formatTime = (ts) => {
