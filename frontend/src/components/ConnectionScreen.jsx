@@ -1,5 +1,8 @@
 import React from 'react';
 import { RiSignalWifiErrorLine, RiBluetoothLine, RiBluetoothFill } from 'react-icons/ri';
+import { Capacitor } from '@capacitor/core';
+
+const isNativePlatform = Capacitor.isNativePlatform();
 
 export default function ConnectionScreen({
   onConnect,
@@ -85,7 +88,7 @@ export default function ConnectionScreen({
         )}
 
         {/* ── Discovered / Paired Device List ─────────────────────────────── */}
-        {discoveredDevices && discoveredDevices.length > 0 && (
+        {isNativePlatform && discoveredDevices && discoveredDevices.length > 0 && (
           <div style={{ width: '100%', maxWidth: '500px', marginTop: '1.5rem' }}>
             <div style={{
               display: 'flex', justifyContent: 'space-between', alignItems: 'center',

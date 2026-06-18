@@ -26,12 +26,10 @@ export default function useSocket() {
 
     socket.on('connect', () => {
       setIsSocketConnected(true);
-      console.log('[Socket] Connected:', socket.id);
     });
 
     socket.on('disconnect', () => {
       setIsSocketConnected(false);
-      console.log('[Socket] Disconnected');
     });
 
     socket.on('deviceData', (data) => {

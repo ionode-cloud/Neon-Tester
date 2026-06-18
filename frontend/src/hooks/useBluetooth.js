@@ -327,19 +327,6 @@ export default function useBluetooth({
     }
   }, []);
 
-  const loadMockDevices = useCallback(() => {
-    const mocks = [
-      { id: 'mock-hc05', name: 'HC-05 (Simulated)', address: '98:D3:31:F4:12:3C', isMock: true },
-      { id: 'mock-hc06', name: 'HC-06 (Simulated)', address: '00:18:E4:35:0F:12', isMock: true },
-      { id: 'mock-esp32', name: 'ESP32-SPP (Simulated)', address: '24:0A:C4:8B:58:A2', isMock: true },
-    ];
-    setDiscoveredDevices(mocks);
-    mocks.forEach(m => {
-      if (onDeviceFound) onDeviceFound(m.name);
-    });
-  }, [onDeviceFound]);
-
-
   // ── Scan: load all paired Bluetooth Classic devices ──────────────────────
   const startScanning = useCallback(async () => {
     setError(null);
@@ -364,12 +351,13 @@ export default function useBluetooth({
         setDiscoveredDevices(mapped);
 
         if (devices.length === 0) {
-          setError('No paired Bluetooth Classic devices found. Please pair your HC-05/ESP32 in Android Settings first.');
+          console.info('[Classic-BT] No paired devices found. Pair devices in Android Settings first.');
         } else {
           mapped.forEach(d => {
             if (onDeviceFound) onDeviceFound(d.name);
           });
         }
+        return null;
       } else {
         // On web browser fallback: Check for Web Serial support
         console.log('[Web] startScanning triggered.');
@@ -382,19 +370,19 @@ export default function useBluetooth({
             const dev = {
               id: 'web-serial-port',
               name: 'HC-05 (Web Serial)',
-              address: 'COM Port (Select to connect)',
+              address: 'COM Port',
               isWebSerial: true
             };
-            setDiscoveredDevices([dev]);
             if (onDeviceFound) onDeviceFound(dev.name);
+            return dev;
           } catch (serialErr) {
             console.warn('[Web] Web Serial request cancelled or failed:', serialErr.message);
-            // Fall back to Mock devices if cancelled/failed
-            loadMockDevices();
+            return null;
           }
         } else {
-          console.info('[Web] Web Serial not supported. Falling back to mock devices.');
-          loadMockDevices();
+          console.info('[Web] Web Serial not supported.');
+          setError('Web Serial is not supported in this browser. Please use Chrome/Edge or the Android app.');
+          return null;
         }
       }
     } catch (err) {
@@ -402,10 +390,11 @@ export default function useBluetooth({
       if (!err.message?.toLowerCase().includes('web') && !err.message?.toLowerCase().includes('stub')) {
         setError(err.message);
       }
+      return null;
     } finally {
       setIsScanning(false);
     }
-  }, [onDeviceFound, loadMockDevices]);
+  }, [onDeviceFound]);
 
 
   const stopScanning = useCallback(() => {
@@ -522,26 +511,9 @@ export default function useBluetooth({
 
         if (simulatedDataIntervalRef.current) {
           clearInterval(simulatedDataIntervalRef.current);
+          simulatedDataIntervalRef.current = null;
         }
-
-        simulatedDataIntervalRef.current = setInterval(() => {
-          const mockData = {
-            tiltAngle: parseFloat((5 + Math.random() * 20).toFixed(1)),
-            height: parseFloat((100 + Math.random() * 30).toFixed(1)),
-            voltageStatus: Math.random() > 0.3,
-            batterySOC: Math.max(0, Math.min(100, Math.round(80 - (Date.now() % 100000) / 10000))),
-            timestamp: new Date()
-          };
-          const rawLine = JSON.stringify({
-            tiltAngle: mockData.tiltAngle,
-            height: mockData.height,
-            voltageStatus: mockData.voltageStatus,
-            batterySOC: mockData.batterySOC
-          });
-          console.log('[Mock-BT] Simulated raw line:', rawLine);
-          appendSerialLog(rawLine, mockData);
-          if (onDataRef.current) onDataRef.current(mockData);
-        }, 2000);
+        console.log('[Mock-BT] Connected in mock mode (no simulated telemetry generation)');
       }
 
       setIsConnecting(false);
@@ -562,74 +534,6 @@ export default function useBluetooth({
     }
   }, [appendSerialLog, readFromWebSerial]);
 
-
-  // ── connect() — directly scans and connects to a device, returning connection result ──
-  const connect = useCallback(async () => {
-    setError(null);
-    setIsConnecting(true);
-
-    try {
-      if (isNativePlatform) {
-        const result = await BluetoothCommunication.scanDevices();
-        const devices = result?.devices ?? [];
-        if (devices.length === 0) {
-          throw new Error('No paired Bluetooth Classic devices found. Please pair your HC-05/ESP32 in Android Settings first.');
-        }
-
-        // Try to reconnect to last used device if it is still paired, else pick the first paired device
-        const lastDeviceStr = localStorage.getItem('lastConnectedDevice');
-        let targetDevice = devices[0];
-        if (lastDeviceStr) {
-          try {
-            const lastDevice = JSON.parse(lastDeviceStr);
-            const match = devices.find(d => d.address === lastDevice.address);
-            if (match) targetDevice = match;
-          } catch { /* ignore */ }
-        }
-
-        const mappedDev = {
-          id: targetDevice.address,
-          name: targetDevice.name || `Device (${targetDevice.address})`,
-          address: targetDevice.address
-        };
-
-        return await connectDevice(mappedDev);
-      } else {
-        // Web browser: Try Web Serial
-        if ('serial' in navigator) {
-          try {
-            console.log('[Web Serial] Requesting port…');
-            const port = await navigator.serial.requestPort();
-            selectedWebSerialPortRef.current = port;
-
-            const dev = {
-              id: 'web-serial-port',
-              name: 'HC-05 (Web Serial)',
-              address: 'COM Port',
-              isWebSerial: true
-            };
-
-            return await connectDevice(dev);
-          } catch (serialErr) {
-            console.warn('[Web Serial] Request cancelled or failed, connecting to mock:', serialErr.message);
-            // Fall back to Mock HC-05 directly
-            const mockDev = { id: 'mock-hc05', name: 'HC-05 (Simulated)', address: '98:D3:31:F4:12:3C', isMock: true };
-            return await connectDevice(mockDev);
-          }
-        } else {
-          // No serial support: Connect to Mock directly
-          console.info('[Web] Web Serial not supported, connecting to mock.');
-          const mockDev = { id: 'mock-hc05', name: 'HC-05 (Simulated)', address: '98:D3:31:F4:12:3C', isMock: true };
-          return await connectDevice(mockDev);
-        }
-      }
-    } catch (err) {
-      setError(err.message);
-      return null;
-    } finally {
-      setIsConnecting(false);
-    }
-  }, [isNativePlatform, connectDevice]);
 
 
   // ── Disconnect ────────────────────────────────────────────────────────────
@@ -701,30 +605,6 @@ export default function useBluetooth({
   }, [connectDevice, onReconnectSuccess]);
 
 
-  // ── Auto-reconnect on startup ─────────────────────────────────────────────
-  useEffect(() => {
-    const autoReconnect = async () => {
-      const lastDeviceStr = localStorage.getItem('lastConnectedDevice');
-      if (!lastDeviceStr) return;
-      const lastDevice = JSON.parse(lastDeviceStr);
-
-      try {
-        setIsReconnecting(true);
-        console.log('[Classic-BT] Auto-reconnect attempt to:', lastDevice.name);
-        await connectDevice(lastDevice);
-      } catch (err) {
-        console.warn('[Classic-BT] Auto-reconnect failed:', err.message);
-      } finally {
-        setIsReconnecting(false);
-      }
-    };
-
-    // Small delay to let plugin initialize
-    const timer = setTimeout(autoReconnect, 1500);
-    return () => clearTimeout(timer);
-  }, [connectDevice]);
-
-
   // ── Fetch Data — sends GET_DATA command, waits for response ──────────────
   const fetchData = useCallback(async () => {
     if (!connectedAddressRef.current) {
@@ -751,29 +631,13 @@ export default function useBluetooth({
             writer.releaseLock();
             console.log('[Web Serial] ✓ GET_DATA command sent — waiting for response…');
           } else {
-            console.log('[Mock-BT] Simulated GET_DATA request…');
-            setTimeout(() => {
-              const mockVal = {
-                tiltAngle: parseFloat((5 + Math.random() * 20).toFixed(1)),
-                height: parseFloat((100 + Math.random() * 30).toFixed(1)),
-                voltageStatus: Math.random() > 0.3,
-                batterySOC: Math.max(0, Math.min(100, Math.round(80 - (Date.now() % 100000) / 10000))),
-                timestamp: new Date()
-              };
-              const rawLine = JSON.stringify({
-                tiltAngle: mockVal.tiltAngle,
-                height: mockVal.height,
-                voltageStatus: mockVal.voltageStatus,
-                batterySOC: mockVal.batterySOC
-              });
-              if (fetchResolveRef.current) {
-                const res = fetchResolveRef.current;
-                fetchResolveRef.current = null;
-                fetchRejectRef.current = null;
-                res(rawLine);
-                appendSerialLog(rawLine, null);
-              }
-            }, 800);
+            console.log('[Mock-BT] Mock GET_DATA requested (no-op)');
+            if (fetchResolveRef.current) {
+              const res = fetchResolveRef.current;
+              fetchResolveRef.current = null;
+              fetchRejectRef.current = null;
+              res("");
+            }
           }
         } catch (primaryErr) {
           console.warn('[Classic-BT] GET_DATA failed, retrying with FETCH:', primaryErr.message);
@@ -842,35 +706,6 @@ export default function useBluetooth({
       } catch (err) {
         console.warn('[Web Serial] Send command failed:', err.message);
       }
-    } else if (connectedAddressRef.current) {
-      console.log('[Mock-BT] Received command:', command);
-      appendSerialLog(`Sent: ${command}`, null);
-
-      if (command.trim() === 'GET_DATA' || command.trim() === 'FETCH') {
-        setTimeout(() => {
-          const mockVal = {
-            tiltAngle: parseFloat((5 + Math.random() * 20).toFixed(1)),
-            height: parseFloat((100 + Math.random() * 30).toFixed(1)),
-            voltageStatus: Math.random() > 0.3,
-            batterySOC: Math.max(0, Math.min(100, Math.round(80 - (Date.now() % 100000) / 10000))),
-            timestamp: new Date()
-          };
-          const rawLine = JSON.stringify({
-            tiltAngle: mockVal.tiltAngle,
-            height: mockVal.height,
-            voltageStatus: mockVal.voltageStatus,
-            batterySOC: mockVal.batterySOC
-          });
-
-          if (fetchResolveRef.current) {
-            const resolve = fetchResolveRef.current;
-            fetchResolveRef.current = null;
-            fetchRejectRef.current = null;
-            resolve(rawLine);
-            appendSerialLog(rawLine, null);
-          }
-        }, 500);
-      }
     }
   }, [appendSerialLog]);
 
@@ -895,7 +730,6 @@ export default function useBluetooth({
 
   return {
     // Actions
-    connect,
     connectDevice,
     disconnect,
     reconnect,

@@ -302,7 +302,7 @@ export default function Dashboard({
             <button
               id="btn-reconnect"
               className="btn btn-warning btn-sm"
-              onClick={onConnect}
+              onClick={onReconnect}
               disabled={isBusy || !isBluetoothPoweredOn}
               title="Scan and reconnect"
             >
