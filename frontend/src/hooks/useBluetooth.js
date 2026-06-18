@@ -34,13 +34,14 @@ function parseHC05Data(raw) {
       const result = {
         tiltAngle: parseFloat(parsed.tiltAngle ?? parsed.TiltAngle ?? 0),
         height: parseFloat(parsed.height ?? parsed.Height ?? 0),
-        voltageStatus: !!(parsed.voltageStatus ?? parsed.VoltageStatus ?? false),
+        voltageStatus: parsed.voltageStatus !== undefined ? String(parsed.voltageStatus) : (parsed.VoltageStatus !== undefined ? String(parsed.VoltageStatus) : ''),
         batterySOC: parseFloat(parsed.batterySOC ?? parsed.BatterySOC ?? 0),
         timestamp: new Date(),
+        rawData: raw,
       };
       console.log('  → Tilt Angle    :', result.tiltAngle, '°');
       console.log('  → Height        :', result.height, 'm');
-      console.log('  → Voltage Status:', result.voltageStatus ? 'Active' : 'Inactive');
+      console.log('  → Voltage Status:', result.voltageStatus);
       console.log('  → Battery SOC   :', result.batterySOC, '%');
       return result;
     } catch (jsonErr) {
@@ -80,11 +81,10 @@ function parseHC05Data(raw) {
     const result = {
       tiltAngle: tiltRaw !== undefined ? parseFloat(tiltRaw) : 0,
       height: heightRaw !== undefined ? parseFloat(heightRaw) : 0,
-      voltageStatus: voltageRaw !== undefined
-        ? (voltageRaw === 'true' || voltageRaw === '1' || voltageRaw === true)
-        : false,
+      voltageStatus: voltageRaw !== undefined ? String(voltageRaw) : '',
       batterySOC: batteryRaw !== undefined ? parseFloat(batteryRaw) : 0,
       timestamp: new Date(),
+      rawData: raw,
     };
 
     if (isNaN(result.tiltAngle) || isNaN(result.height) || isNaN(result.batterySOC)) {
@@ -94,7 +94,7 @@ function parseHC05Data(raw) {
 
     console.log('  → Tilt Angle    :', result.tiltAngle, '°');
     console.log('  → Height        :', result.height, 'm');
-    console.log('  → Voltage Status:', result.voltageStatus ? 'Active' : 'Inactive');
+    console.log('  → Voltage Status:', result.voltageStatus);
     console.log('  → Battery SOC   :', result.batterySOC, '%');
     return result;
   } catch (kvErr) {

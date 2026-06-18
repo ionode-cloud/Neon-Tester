@@ -86,7 +86,7 @@ exports.getHistory = async (req, res) => {
 // Save a real device reading (called from Postman or real BT device)
 exports.postData = async (req, res) => {
   try {
-    const { deviceId, tiltAngle, height, voltageStatus, batterySOC, latitude, longitude } = req.body;
+    const { deviceId, tiltAngle, height, voltageStatus, batterySOC, latitude, longitude, rawData } = req.body;
 
     // Validate required fields
     const missing = [];
@@ -136,8 +136,9 @@ exports.postData = async (req, res) => {
       deviceId,
       tiltAngle:     parseFloat(tiltAngle),
       height:        parseFloat(height),
-      voltageStatus: Boolean(voltageStatus),
+      voltageStatus: voltageStatus !== undefined ? String(voltageStatus) : '',
       batterySOC:    parseFloat(batterySOC),
+      rawData:       rawData || undefined,
       latitude:      (latitude !== undefined && latitude !== null) ? parseFloat(latitude) : undefined,
       longitude:     (longitude !== undefined && longitude !== null) ? parseFloat(longitude) : undefined,
       timestamp:     new Date(),
@@ -171,7 +172,7 @@ exports.postData = async (req, res) => {
 // Saves a NEW reading with the updated fields, preserving the old reading in the database
 exports.putData = async (req, res) => {
   try {
-    const { id, _id, deviceId, tiltAngle, height, voltageStatus, batterySOC, latitude, longitude } = req.body;
+    const { id, _id, deviceId, tiltAngle, height, voltageStatus, batterySOC, latitude, longitude, rawData } = req.body;
     const targetId = id || _id || req.query.id || req.query._id;
     const targetDeviceId = deviceId || req.query.deviceId;
 
@@ -223,10 +224,11 @@ exports.putData = async (req, res) => {
     }
 
     if (voltageStatus !== undefined) {
-      if (typeof voltageStatus !== 'boolean' && voltageStatus !== 'true' && voltageStatus !== 'false' && voltageStatus !== 0 && voltageStatus !== 1) {
-        return res.status(400).json({ success: false, error: 'voltageStatus must be a boolean (true or false)' });
-      }
-      newReading.voltageStatus = voltageStatus === true || voltageStatus === 'true' || voltageStatus === 1;
+      newReading.voltageStatus = String(voltageStatus);
+    }
+
+    if (rawData !== undefined) {
+      newReading.rawData = rawData;
     }
 
     if (batterySOC !== undefined) {

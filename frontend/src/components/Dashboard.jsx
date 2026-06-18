@@ -29,14 +29,14 @@ function RssiBars({ rssi }) {
 // ─── Connection status badge
 function BtStatusBadge({ status }) {
   const cfg = {
-    connected:    { label: 'Connected',     cls: 'bt-badge-connected',    dot: 'connected' },
-    connecting:   { label: 'Connecting…',   cls: 'bt-badge-connecting',   dot: 'pulsing' },
-    reconnecting: { label: 'Reconnecting…', cls: 'bt-badge-connecting',   dot: 'pulsing' },
-    fetching:     { label: 'Fetching Data', cls: 'bt-badge-fetching',     dot: 'pulsing' },
-    scanning:     { label: 'Scanning…',     cls: 'bt-badge-connecting',   dot: 'pulsing' },
-    disconnected: { label: 'Disconnected',  cls: 'bt-badge-disconnected', dot: 'disconnected' },
-    off:          { label: 'BT Off',        cls: 'bt-badge-disconnected', dot: 'disconnected' },
-    unsupported:  { label: 'Unsupported',   cls: 'bt-badge-disconnected', dot: 'disconnected' },
+    connected: { label: 'Connected', cls: 'bt-badge-connected', dot: 'connected' },
+    connecting: { label: 'Connecting…', cls: 'bt-badge-connecting', dot: 'pulsing' },
+    reconnecting: { label: 'Reconnecting…', cls: 'bt-badge-connecting', dot: 'pulsing' },
+    fetching: { label: 'Fetching Data', cls: 'bt-badge-fetching', dot: 'pulsing' },
+    scanning: { label: 'Scanning…', cls: 'bt-badge-connecting', dot: 'pulsing' },
+    disconnected: { label: 'Disconnected', cls: 'bt-badge-disconnected', dot: 'disconnected' },
+    off: { label: 'BT Off', cls: 'bt-badge-disconnected', dot: 'disconnected' },
+    unsupported: { label: 'Unsupported', cls: 'bt-badge-disconnected', dot: 'disconnected' },
   }[status] ?? { label: status, cls: 'bt-badge-disconnected', dot: 'disconnected' };
 
   return (
@@ -81,13 +81,13 @@ export default function Dashboard({
   onClearSerialLog,
   onSendCommand,
 }) {
-  const [history, setHistory]           = useState([]);
-  const [flashKey, setFlashKey]         = useState(0);
-  const [lastUpdated, setLastUpdated]   = useState(null);
+  const [history, setHistory] = useState([]);
+  const [flashKey, setFlashKey] = useState(0);
+  const [lastUpdated, setLastUpdated] = useState(null);
   const [showFetchResult, setShowFetchResult] = useState(false);
-  const prevDataRef       = useRef(null);
-  const prevUpdatedRef    = useRef(null);
-  const prevDeletedRef    = useRef(null);
+  const prevDataRef = useRef(null);
+  const prevUpdatedRef = useRef(null);
+  const prevDeletedRef = useRef(null);
   const prevAllDeletedRef = useRef(null);
 
   // Auto-show fetch result when new data arrives
@@ -363,7 +363,7 @@ export default function Dashboard({
           <div className="fetch-result-header">
             <div className="fetch-result-title">
               {fetchDataError
-                ? <><RiErrorWarningLine /> Fetch Failed</>              
+                ? <><RiErrorWarningLine /> Fetch Failed</>
                 : <><RiCheckLine /> Data Received from HC-05</>
               }
             </div>

@@ -20,15 +20,19 @@ const deviceDataSchema = new mongoose.Schema(
       min: 0,
     },
     voltageStatus: {
-      type: Boolean,
+      type: String,
       required: true,
-      default: false,
+      default: '',
     },
     batterySOC: {
       type: Number,
       required: true,
       min: 0,
       max: 100,
+    },
+    rawData: {
+      type: String,
+      required: false,
     },
     latitude: {
       type: Number,

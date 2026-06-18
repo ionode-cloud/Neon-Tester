@@ -3,6 +3,12 @@ import { RiDatabase2Line } from 'react-icons/ri';
 import { deviceApi } from '../services/api';
 import BatteryBar from './BatteryBar';
 
+const isVoltageActive = (status) => {
+  if (!status) return false;
+  const s = String(status).toLowerCase();
+  return s === 'true' || s === 'active' || s === 'normal' || s === '1' || s === 'ok' || s === 'on';
+};
+
 export default function CloudDataView({ lastCreated, lastUpdated, lastDeleted, lastAllDeleted }) {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -21,17 +27,20 @@ export default function CloudDataView({ lastCreated, lastUpdated, lastDeleted, l
       limit,
     })
       .then((res) => {
-        if (res.success) {
+        if (res && res.success) {
           setData(res.data);
           setTotalPages(res.pagination.pages);
           setTotalRecords(res.pagination.total);
           setError(null);
         } else {
-          setError(res.error || 'Failed to fetch history data');
+          const errMsg = res?.error || 'Invalid API response format';
+          console.error('[CloudDataView] Fetch telemetry history error details:', res);
+          setError(errMsg);
         }
       })
       .catch((err) => {
-        setError(err.message || 'Error communicating with server');
+        console.error('[CloudDataView] Error communicating with server:', err);
+        setError('Unable to connect to the telemetry database. Please check your network connection.');
       })
       .finally(() => {
         if (!isBackground) {
@@ -144,18 +153,17 @@ export default function CloudDataView({ lastCreated, lastUpdated, lastDeleted, l
           </div>
         ) : !data.length ? (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '300px', padding: '2rem' }}>
-            <p className="text-lg text-muted">No telemetry records found.</p>
+            <p className="text-lg text-muted">No telemetry records found</p>
           </div>
         ) : (
           <div style={{ overflowX: 'auto', flex: 1 }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.875rem' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)' }}>
-                  <th style={{ padding: '1rem', color: 'var(--text-secondary)' }}>Timestamp</th>
-                  <th style={{ padding: '1rem', color: 'var(--text-secondary)' }}>Device ID</th>
+                  <th style={{ padding: '1rem', color: 'var(--text-secondary)' }}>Time</th>
                   <th style={{ padding: '1rem', color: 'var(--text-secondary)', textAlign: 'right' }}>Tilt Angle</th>
                   <th style={{ padding: '1rem', color: 'var(--text-secondary)', textAlign: 'right' }}>Height</th>
-                  <th style={{ padding: '1rem', color: 'var(--text-secondary)', textAlign: 'center' }}>Voltage</th>
+                  <th style={{ padding: '1rem', color: 'var(--text-secondary)', textAlign: 'center' }}>Voltage Status</th>
                   <th style={{ padding: '1rem', color: 'var(--text-secondary)' }}>Battery SOC</th>
                 </tr>
               </thead>
@@ -163,16 +171,18 @@ export default function CloudDataView({ lastCreated, lastUpdated, lastDeleted, l
                 {data.map((row) => (
                   <tr key={row._id} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', transition: 'background var(--transition-fast)' }} className="table-row-hover">
                     <td style={{ padding: '0.875rem 1rem', fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{formatTime(row.timestamp)}</td>
-                    <td style={{ padding: '0.875rem 1rem', fontFamily: 'var(--font-mono)', color: 'var(--neon-cyan)' }}>{row.deviceId}</td>
-                    <td style={{ padding: '0.875rem 1rem', textAlign: 'right', fontWeight: '600' }}>{row.tiltAngle.toFixed(1)}°</td>
-                    <td style={{ padding: '0.875rem 1rem', textAlign: 'right', fontFamily: 'var(--font-mono)', color: '#a78bfa' }}>{row.height.toFixed(2)} m</td>
+                    <td style={{ padding: '0.875rem 1rem', textAlign: 'right', fontWeight: '600' }}>{row.tiltAngle !== undefined && row.tiltAngle !== null ? `${row.tiltAngle.toFixed(1)}°` : '0.0°'}</td>
+                    <td style={{ padding: '0.875rem 1rem', textAlign: 'right', fontFamily: 'var(--font-mono)', color: '#a78bfa' }}>{row.height !== undefined && row.height !== null ? `${row.height.toFixed(2)} m` : '0.00 m'}</td>
                     <td style={{ padding: '0.875rem 1rem', textAlign: 'center' }}>
-                      <span className={`badge ${row.voltageStatus ? 'badge-active' : 'badge-inactive'}`} style={{ fontSize: '0.75rem' }}>
-                        {row.voltageStatus ? 'Active' : 'Inactive'}
+                      <span className={`badge ${isVoltageActive(row.voltageStatus) ? 'badge-active' : 'badge-inactive'}`} style={{ fontSize: '0.75rem' }}>
+                        {row.voltageStatus || 'N/A'}
                       </span>
                     </td>
                     <td style={{ padding: '0.875rem 1rem', width: '220px' }}>
-                      <BatteryBar value={row.batterySOC} />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontWeight: '600', minWidth: '40px' }}>{row.batterySOC}%</span>
+                        <BatteryBar value={row.batterySOC} />
+                      </div>
                     </td>
                   </tr>
                 ))}
