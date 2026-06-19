@@ -13,6 +13,18 @@ import LocationCard from './LocationCard';
 
 const MAX_HISTORY = 60;
 
+// ─── IST date helper ─────────────────────────────────────────────────────────
+const getISTDate = () => new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+
+// ─── Voltage Active check ─────────────────────────────────────────────────────
+// 'false', '0', 'inactive', etc. must return false even though they are non-empty strings
+const isVoltageActive = (status) => {
+  if (status === null || status === undefined || status === '') return false;
+  const s = String(status).toLowerCase().trim();
+  return s === 'true' || s === 'active' || s === 'normal' || s === '1' || s === 'ok' || s === 'on';
+};
+
+
 // ─── Signal strength bars helper ──────────────────────────────────────────
 function RssiBars({ rssi }) {
   const level = rssi >= -60 ? 'rssi-strong' : rssi >= -70 ? 'rssi-medium' : rssi >= -80 ? 'rssi-weak' : 'rssi-poor';
@@ -209,6 +221,7 @@ export default function Dashboard({
     if (!ts) return '--';
     return new Intl.DateTimeFormat('en-US', {
       hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+      timeZone: 'UTC',
     }).format(new Date(ts));
   };
 
@@ -217,7 +230,7 @@ export default function Dashboard({
     const tilts = history.map(h => h.tiltAngle).filter((v) => v !== undefined && v !== null);
     const heights = history.map(h => h.height).filter((v) => v !== undefined && v !== null);
     const batts = history.map(h => h.batterySOC).filter((v) => v !== undefined && v !== null);
-    const activeVoltage = history.filter(h => h.voltageStatus).length;
+    const activeVoltage = history.filter(h => isVoltageActive(h.voltageStatus)).length;
     return {
       avgTilt: tilts.reduce((a, b) => a + b, 0) / tilts.length || 0,
       maxTilt: Math.max(...tilts, 0),
@@ -406,8 +419,8 @@ export default function Dashboard({
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.3rem 0', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
                   <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>⚡ Voltage</span>
-                  <span style={{ color: fetchDataResult.voltageStatus ? 'var(--neon-green)' : 'var(--neon-red)', fontWeight: 600 }}>
-                    {fetchDataResult.voltageStatus !== undefined ? (fetchDataResult.voltageStatus ? 'Active' : 'Inactive') : '--'}
+                  <span style={{ color: isVoltageActive(fetchDataResult.voltageStatus) ? 'var(--neon-green)' : 'var(--neon-red)', fontWeight: 600 }}>
+                    {fetchDataResult.voltageStatus !== undefined ? (isVoltageActive(fetchDataResult.voltageStatus) ? 'Active' : 'Inactive') : '--'}
                   </span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.3rem 0', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
@@ -455,10 +468,10 @@ export default function Dashboard({
           icon={<RiFlashlightLine />}
           label="Voltage Status"
           value={current?.voltageStatus !== undefined && current?.voltageStatus !== null
-            ? (current.voltageStatus ? 'Active' : 'Inactive')
+            ? (isVoltageActive(current.voltageStatus) ? 'Active' : 'Inactive')
             : '--'}
           unit=""
-          color={current?.voltageStatus ? 'green' : 'red'}
+          color={isVoltageActive(current?.voltageStatus) ? 'green' : 'red'}
           subLabel={stats ? `Uptime: ${stats.voltageUptime}%` : undefined}
           className="animate-fadeInUp stagger-3"
         />

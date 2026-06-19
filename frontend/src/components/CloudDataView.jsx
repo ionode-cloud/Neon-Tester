@@ -83,7 +83,7 @@ export default function CloudDataView({ lastCreated, lastUpdated, lastDeleted, l
     const csvRows = [
       headers.join(','),
       ...data.map((row) => [
-        new Date(row.timestamp).toISOString(),
+        new Date(row.timestamp).toLocaleString('sv-SE', { timeZone: 'UTC' }).replace('T', ' '),
         row.deviceId || '',
         row.tiltAngle,
         row.height,
@@ -129,7 +129,8 @@ export default function CloudDataView({ lastCreated, lastUpdated, lastDeleted, l
   const formatTime = (ts) => {
     return new Intl.DateTimeFormat('en-US', {
       year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+      timeZone: 'UTC',
     }).format(new Date(ts));
   };
 

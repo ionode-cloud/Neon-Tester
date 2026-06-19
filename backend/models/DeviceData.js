@@ -44,7 +44,10 @@ const deviceDataSchema = new mongoose.Schema(
     },
     timestamp: {
       type: Date,
-      default: Date.now,
+      default: () => {
+        const ist = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+        return ist;
+      },
     },
   },
   {

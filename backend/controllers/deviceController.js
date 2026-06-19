@@ -1,6 +1,9 @@
 const mongoose = require('mongoose');
 const DeviceData = require('../models/DeviceData');
 
+// ─── IST date helper ─────────────────────────────────────────────────────────
+const getISTDate = () => new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+
 // ─── In-memory connection state ──────────────────────────────────────────────
 let connectionState = {
   connected: false,
@@ -141,7 +144,7 @@ exports.postData = async (req, res) => {
       rawData:       rawData || undefined,
       latitude:      (latitude !== undefined && latitude !== null) ? parseFloat(latitude) : undefined,
       longitude:     (longitude !== undefined && longitude !== null) ? parseFloat(longitude) : undefined,
-      timestamp:     new Date(),
+      timestamp:     getISTDate(),
     });
 
     await reading.save();
@@ -203,7 +206,7 @@ exports.putData = async (req, res) => {
 
     const newReading = new DeviceData({
       ...baseData,
-      timestamp: new Date(),
+      timestamp: getISTDate(),
     });
 
     // Update fields if provided

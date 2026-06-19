@@ -9,6 +9,7 @@ export default function Header({ deviceInfo, isConnected, isPhysicalConnected, i
       minute: '2-digit',
       second: '2-digit',
       hour12: false,
+      timeZone: 'UTC',
     }).format(new Date(date));
   };
 
