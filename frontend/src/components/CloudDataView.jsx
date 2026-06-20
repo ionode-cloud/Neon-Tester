@@ -78,20 +78,21 @@ export default function CloudDataView({ lastCreated, lastUpdated, lastDeleted, l
   };
 
   // ─── IST timestamp formatter for CSV export ────────────────────────────────────────
+  // Builds "DD-MM-YYYY HH:MM:SS AM/PM" with dashes so Excel does NOT
+  // auto-convert it to a date serial number (which causes ##########).
   const formatIndianDateTime = (timestamp) => {
     if (!timestamp) return '';
-    return new Intl.DateTimeFormat('en-IN', {
-      timeZone: 'Asia/Kolkata',
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: true,
-    })
-      .format(new Date(timestamp))
-      .replace(',', '');
+    // Shift UTC to IST by adding 5h 30m
+    const ist = new Date(new Date(timestamp).getTime() + 5.5 * 60 * 60 * 1000);
+    const dd   = String(ist.getUTCDate()).padStart(2, '0');
+    const mm   = String(ist.getUTCMonth() + 1).padStart(2, '0');
+    const yyyy = ist.getUTCFullYear();
+    let   hh   = ist.getUTCHours();
+    const min  = String(ist.getUTCMinutes()).padStart(2, '0');
+    const sec  = String(ist.getUTCSeconds()).padStart(2, '0');
+    const ampm = hh >= 12 ? 'PM' : 'AM';
+    hh = hh % 12 || 12;
+    return `${dd}-${mm}-${yyyy} ${String(hh).padStart(2, '0')}:${min}:${sec} ${ampm}`;
   };
 
   const handleExportCSV = async () => {
@@ -99,19 +100,26 @@ export default function CloudDataView({ lastCreated, lastUpdated, lastDeleted, l
     const headers = ['Timestamp', 'Device ID', 'Tilt Angle (°)', 'Height (m)', 'Voltage Status', 'Battery SOC (%)', 'Latitude', 'Longitude'];
     const csvRows = [
       headers.join(','),
-      ...data.map((row) => [
-        formatIndianDateTime(row.timestamp),
-        row.deviceId || '',
-        row.tiltAngle,
-        row.height,
-        row.voltageStatus || '',
-        row.batterySOC,
-        row.latitude !== undefined && row.latitude !== null ? row.latitude : '',
-        row.longitude !== undefined && row.longitude !== null ? row.longitude : '',
-      ].map(val => `"${val}"`).join(','))
+      ...data.map((row) => {
+        // Use =" formula prefix on timestamp so every spreadsheet app (Excel, WPS,
+        // Google Sheets) stores it as PLAIN TEXT — never a date serial (##########)
+        const ts = `="${formatIndianDateTime(row.timestamp)}"`;
+        return [
+          ts,
+          `"${row.deviceId || ''}"`,
+          `"${row.tiltAngle}"`,
+          `"${row.height}"`,
+          `"${row.voltageStatus || ''}"`,
+          `"${row.batterySOC}"`,
+          `"${row.latitude !== undefined && row.latitude !== null ? row.latitude : ''}"`,
+          `"${row.longitude !== undefined && row.longitude !== null ? row.longitude : ''}"`,
+        ].join(',');
+      })
     ];
 
-    const csvContent = csvRows.join('\n');
+    // \uFEFF = UTF-8 BOM — tells Excel to open as UTF-8 text, not auto-convert dates
+    const csvContent = '\uFEFF' + csvRows.join('\n');
+
 
     if (Capacitor.isNativePlatform()) {
       try {
