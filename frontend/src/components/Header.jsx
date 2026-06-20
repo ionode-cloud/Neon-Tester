@@ -4,12 +4,12 @@ import { RiBluetoothFill } from 'react-icons/ri';
 export default function Header({ deviceInfo, isConnected, isPhysicalConnected, isSocketConnected, lastUpdated }) {
   const formatTime = (date) => {
     if (!date) return '--';
-    return new Intl.DateTimeFormat('en-US', {
+    return new Intl.DateTimeFormat('en-IN', {
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
-      hour12: false,
-      timeZone: 'UTC',
+      hour12: true,
+      timeZone: 'Asia/Kolkata',
     }).format(new Date(date));
   };
 

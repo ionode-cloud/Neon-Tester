@@ -9,9 +9,6 @@ const deviceRoutes = require('./routes/device');
 const updateRoutes = require('./routes/update');
 const ctrl = require('./controllers/deviceController');
 
-// ─── IST date helper ─────────────────────────────────────────────────────────
-const getISTDate = () => new Date(Date.now() + 5.5 * 60 * 60 * 1000);
-
 
 // ─── App Setup ─────────
 const app = express();
@@ -108,7 +105,7 @@ io.on('connection', (socket) => {
         rawData:       payload.rawData || undefined,
         latitude:      (payload.latitude !== undefined && payload.latitude !== null) ? parseFloat(payload.latitude) : undefined,
         longitude:     (payload.longitude !== undefined && payload.longitude !== null) ? parseFloat(payload.longitude) : undefined,
-        timestamp:     getISTDate(),
+        timestamp:     new Date(),
       });
       if (mongoose.connection.readyState === 1) {
         await reading.save();

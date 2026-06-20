@@ -8,9 +8,6 @@ const isNativePlatform = Capacitor.isNativePlatform();
 // ─── Serial log cap ───────────────────────────────────────────────────────────
 const MAX_SERIAL_LOG = 50;
 
-// ─── IST date helper ─────────────────────────────────────────────────────────
-const getISTDate = () => new Date(Date.now() + 5.5 * 60 * 60 * 1000);
-
 // ─── HC-05 / ESP32 SPP Data Parser ───────────────────────────────────────────
 /**
  * Parses incoming serial string into a structured data object.
@@ -39,7 +36,7 @@ function parseHC05Data(raw) {
         height: parseFloat(parsed.height ?? parsed.Height ?? 0),
         voltageStatus: parsed.voltageStatus !== undefined ? String(parsed.voltageStatus) : (parsed.VoltageStatus !== undefined ? String(parsed.VoltageStatus) : ''),
         batterySOC: parseFloat(parsed.batterySOC ?? parsed.BatterySOC ?? 0),
-        timestamp: getISTDate(),
+        timestamp: new Date(),
         rawData: raw,
       };
       console.log('  → Tilt Angle    :', result.tiltAngle, '°');
@@ -86,7 +83,7 @@ function parseHC05Data(raw) {
       height: heightRaw !== undefined ? parseFloat(heightRaw) : 0,
       voltageStatus: voltageRaw !== undefined ? String(voltageRaw) : '',
       batterySOC: batteryRaw !== undefined ? parseFloat(batteryRaw) : 0,
-      timestamp: getISTDate(),
+      timestamp: new Date(),
       rawData: raw,
     };
 

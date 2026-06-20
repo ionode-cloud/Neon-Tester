@@ -77,13 +77,30 @@ export default function CloudDataView({ lastCreated, lastUpdated, lastDeleted, l
     }
   };
 
+  // ─── IST timestamp formatter for CSV export ────────────────────────────────────────
+  const formatIndianDateTime = (timestamp) => {
+    if (!timestamp) return '';
+    return new Intl.DateTimeFormat('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+    })
+      .format(new Date(timestamp))
+      .replace(',', '');
+  };
+
   const handleExportCSV = async () => {
     if (!data.length) return;
     const headers = ['Timestamp', 'Device ID', 'Tilt Angle (°)', 'Height (m)', 'Voltage Status', 'Battery SOC (%)', 'Latitude', 'Longitude'];
     const csvRows = [
       headers.join(','),
       ...data.map((row) => [
-        new Date(row.timestamp).toLocaleString('sv-SE', { timeZone: 'UTC' }).replace('T', ' '),
+        formatIndianDateTime(row.timestamp),
         row.deviceId || '',
         row.tiltAngle,
         row.height,
@@ -127,10 +144,10 @@ export default function CloudDataView({ lastCreated, lastUpdated, lastDeleted, l
   };
 
   const formatTime = (ts) => {
-    return new Intl.DateTimeFormat('en-US', {
+    return new Intl.DateTimeFormat('en-IN', {
       year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-      timeZone: 'UTC',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true,
+      timeZone: 'Asia/Kolkata',
     }).format(new Date(ts));
   };
 

@@ -10,9 +10,9 @@ export default function LocationCard({ location, error, loading, pairTime, onCli
 
   const formatPairTime = (date) => {
     if (!date) return '--';
-    return new Intl.DateTimeFormat('en-US', {
-      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-      timeZone: 'UTC',
+    return new Intl.DateTimeFormat('en-IN', {
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true,
+      timeZone: 'Asia/Kolkata',
     }).format(new Date(date));
   };
 
